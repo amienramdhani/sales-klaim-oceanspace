@@ -34,7 +34,7 @@ class VehicleServiceClaimResource extends Resource
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance()) return false;
+        if (!$user || $user->isFinance() || $user->isJejen()) return false;
         return $user->isSuperAdmin() || $user->isAdmin() || $user->isAsm() || $user->isRgm() || $user->isSales();
     }
 
@@ -48,14 +48,20 @@ class VehicleServiceClaimResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()
+        $user = auth()->user();
+        $query = parent::getEloquentQuery()
             ->where(function ($q) {
                 $q->where('claim_category', 'service')
                   ->orWhere('claim_category', 'service_motor')
                   ->orWhere('claim_type', 'like', '%Service%');
             })
-            ->with(['employee.role', 'employee.positionModel', 'branch', 'claimPeriod.employee'])
-            ->visibleToUser();
+            ->with(['employee.role', 'employee.positionModel', 'branch', 'claimPeriod.employee']);
+
+        if ($user && $user->isFieldUser() && !$user->isAdmin() && !$user->isSuperAdmin()) {
+            return $query->ownSubmissionsOnly($user);
+        }
+
+        return $query->visibleToUser($user);
     }
 
     public static function form(Form $form): Form

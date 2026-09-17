@@ -32,6 +32,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->profile(\App\Filament\Pages\EditProfile::class)
             ->brandName('PT. Media Selular Indonesia')
             ->brandLogo(asset('images/company-logo.png'))
             ->brandLogoHeight('2.6rem')

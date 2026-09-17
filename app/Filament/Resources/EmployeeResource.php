@@ -112,6 +112,30 @@ class EmployeeResource extends Resource
                             ->native(false),
                     ])->columns(2),
 
+                Forms\Components\Section::make('Informasi Rekening Bank Pencairan')
+                    ->description('Data rekening bank tujuan transfer pencairan klaim oleh tim Finance')
+                    ->icon('heroicon-o-credit-card')
+                    ->schema([
+                        Forms\Components\TextInput::make('bank_name')
+                            ->label('Nama Bank')
+                            ->placeholder('Contoh: BCA / MANDIRI / BRI / BNI / BSI')
+                            ->datalist([
+                                'BCA', 'MANDIRI', 'BRI', 'BNI', 'BSI', 'CIMB NIAGA', 'PERMATA', 'DANAMON', 'BTN', 'JAGO', 'SEABANK', 'BCA SYARIAH'
+                            ])
+                            ->maxLength(100),
+
+                        Forms\Components\TextInput::make('bank_account_number')
+                            ->label('Nomor Rekening')
+                            ->placeholder('Contoh: 1234567890')
+                            ->maxLength(100),
+
+                        Forms\Components\TextInput::make('bank_account_name')
+                            ->label('Nama Pemilik Rekening (Atas Nama)')
+                            ->placeholder('Contoh: HENDRA SETIA PERMANA')
+                            ->maxLength(255)
+                            ->helperText('Nama yang tertera pada buku tabungan / rekening.'),
+                    ])->columns(3),
+
                 Forms\Components\Section::make('Alokasi Plafon & Budget Karyawan')
                     ->description('Tentukan anggaran operasional per bulan untuk karyawan ini. Budget BBM diatur fleksibel per user dan terintegrasi langsung ke alur pencairan Finance.')
                     ->icon('heroicon-o-banknotes')
@@ -270,6 +294,12 @@ class EmployeeResource extends Resource
                     ->label('Homebase')
                     ->searchable()
                     ->default('Purwokerto'),
+                Tables\Columns\TextColumn::make('bank_account_number')
+                    ->label('Rekening Bank')
+                    ->description(fn (Employee $record) => $record->bank_name ? "{$record->bank_name} a/n {$record->bank_account_name}" : null)
+                    ->placeholder('Belum Ada')
+                    ->searchable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('status')
                     ->label('Status')
                     ->badge()

@@ -62,6 +62,8 @@ class Claim extends Model
         'approved_by_rgm_at',
         'approved_by_jejen_id',
         'approved_by_jejen_at',
+        'admin_approved_by_id',
+        'admin_approved_at',
         'rejection_reason',
         'disbursement_status',
         'disbursed_at',
@@ -129,6 +131,8 @@ class Claim extends Model
         'approved_by_asm_at' => 'datetime',
         'approved_by_rgm_at' => 'datetime',
         'approved_by_jejen_at' => 'datetime',
+        'admin_approved_at' => 'datetime',
+        'finance_approved_at' => 'datetime',
         'disbursed_at' => 'datetime',
     ];
 
@@ -137,6 +141,15 @@ class Claim extends Model
         static::creating(function (Claim $claim) {
             if (empty($claim->user_id) && auth()->check()) {
                 $claim->user_id = auth()->id();
+            }
+            if (empty($claim->employee_id) && auth()->check() && auth()->user()->employee_id) {
+                $claim->employee_id = auth()->user()->employee_id;
+            }
+            if (empty($claim->_uid)) {
+                $claim->_uid = 'UID-' . date('Ymd') . '-' . str_pad(mt_rand(1000, 9999), 4, '0', STR_PAD_LEFT);
+            }
+            if (empty($claim->approval_status) || $claim->approval_status === 'DRAFT') {
+                $claim->approval_status = 'DIAJUKAN';
             }
         });
 
@@ -651,16 +664,102 @@ class Claim extends Model
         return $this->belongsTo(User::class, 'approved_by_jejen_id');
     }
 
+    public function adminApprovedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'admin_approved_by_id');
+    }
+
+    public function financeApprovedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'finance_approved_by_id');
+    }
+
+    /**
+     * Cek apakah user adalah ASM atasan langsung dari pemohon klaim
+     */
+    public static function isAsmSupervisorOf(?User $user, Claim $record): bool
+    {
+        if (!$user) return false;
+        if ($user->isSuperAdmin() || $user->isAdmin()) return true;
+        if (!$user->isAsm()) return false;
+
+        $applicantEmp = $record->effective_employee;
+        if (!$applicantEmp) return false;
+
+        // Jika pemohon adalah ASM atau RGM, ASM tidak bisa meng-ACC
+        if ($applicantEmp->isAsm() || $applicantEmp->isRgm()) return false;
+
+        $asmEmpId = $user->getEffectiveEmployeeId();
+        if ($asmEmpId && $applicantEmp->supervisor_id == $asmEmpId) {
+            return true;
+        }
+
+        // Fallback: region
+        if (!$applicantEmp->supervisor_id) {
+            $userRegions = $user->getRegionList();
+            if ($applicantEmp->region && in_array(strtoupper($applicantEmp->region), $userRegions)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Cek apakah user adalah RGM atasan dari pemohon (atasan dari ASM atau atasan Sales)
+     */
+    public static function isRgmSupervisorOf(?User $user, Claim $record): bool
+    {
+        if (!$user) return false;
+        if ($user->isSuperAdmin() || $user->isAdmin()) return true;
+        if (!$user->isRgm()) return false;
+
+        $applicantEmp = $record->effective_employee;
+        if (!$applicantEmp) return false;
+
+        // Jika pemohon adalah RGM, RGM tidak bisa meng-ACC diri sendiri
+        if ($applicantEmp->isRgm()) return false;
+
+        $rgmEmpId = $user->getEffectiveEmployeeId();
+        // 1. Jika pemohon adalah ASM di bawah RGM ini
+        if ($rgmEmpId && $applicantEmp->supervisor_id == $rgmEmpId) {
+            return true;
+        }
+
+        // 2. Jika pemohon adalah Sales yang ASM-nya di bawah RGM ini
+        if ($rgmEmpId && $applicantEmp->supervisor?->supervisor_id == $rgmEmpId) {
+            return true;
+        }
+
+        // Fallback: region
+        $userRegions = $user->getRegionList();
+        if ($applicantEmp->region && in_array(strtoupper($applicantEmp->region), $userRegions)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Cek apakah user berhak melakukan persetujuan level Pak Jejen (Head of Sales)
+     */
+    public static function isJejenApproverOf(?User $user, Claim $record): bool
+    {
+        if (!$user) return false;
+        return $user->isJejen() || $user->isSuperAdmin() || $user->isAdmin();
+    }
+
     /**
      * Scope a query to only include claims visible to the given user.
      *
      * Rules:
      * 1. Super Admin: sees all claims.
-     * 2. Finance: only sees claims being submitted ('approval_status' == 'DIAJUKAN').
-     * 3. Admin: only sees claims they inputted ('user_id' == $admin->id)
-     *    OR claims from users whose region matches any of the admin's managed regions.
-     *    Does NOT see claims from other admins or other regions.
-     * 4. Field users (ASM, RGM, Sales, etc.): only see their own claims.
+     * 2. Finance: only sees claims ready for disbursement (DISETUJUI), in revision (DITOLAK_FINANCE), or disbursed.
+     * 3. Admin: sees claims they inputted OR matching their managed regions.
+     * 4. ASM: sees their own claims + subordinates' claims.
+     * 5. RGM: sees their own claims + ASM subordinates' claims + Sales under ASM.
+     * 6. Pak Jejen: sees their own claims + claims pending their approval / approved.
+     * 7. Field users (Sales): only see their own claims.
      */
     public function scopeVisibleToUser(Builder $query, ?User $user = null): Builder
     {
@@ -675,7 +774,7 @@ class Claim extends Model
 
         if ($user->isFinance()) {
             return $query->where(function (Builder $q) {
-                $q->where('approval_status', '!=', 'DRAFT')
+                $q->whereIn('approval_status', ['DISETUJUI', 'DITOLAK_FINANCE'])
                   ->orWhere('disbursement_status', 'Sudah Dicairkan');
             });
         }
@@ -718,7 +817,71 @@ class Claim extends Model
             });
         }
 
+        $empId = $user->getEffectiveEmployeeId();
+
+        if ($user->isAsm()) {
+            return $query->where(function (Builder $q) use ($user, $empId) {
+                $q->where('user_id', $user->id);
+                if ($empId) {
+                    $q->orWhere('employee_id', $empId)
+                      ->orWhereHas('employee', fn ($eq) => $eq->where('supervisor_id', $empId));
+                }
+                $regions = $user->getRegionList();
+                if (!empty($regions)) {
+                    $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
+                }
+            });
+        }
+
+        if ($user->isRgm()) {
+            return $query->where(function (Builder $q) use ($user, $empId) {
+                $q->where('user_id', $user->id);
+                if ($empId) {
+                    $q->orWhere('employee_id', $empId)
+                      ->orWhereHas('employee', fn ($eq) => $eq->where('supervisor_id', $empId))
+                      ->orWhereHas('employee.supervisor', fn ($sq) => $sq->where('supervisor_id', $empId));
+                }
+                $regions = $user->getRegionList();
+                if (!empty($regions)) {
+                    $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
+                }
+            });
+        }
+
+        if ($user->isJejen()) {
+            return $query->where(function (Builder $q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhereIn('approval_status', ['ACC_RGM', 'ACC_PAK_JEJEN', 'DISETUJUI'])
+                  ->orWhere(function ($sub) {
+                      $sub->where('approval_status', 'DIAJUKAN')
+                          ->whereHas('employee', function ($eq) {
+                              $eq->whereHas('positionModel', fn ($pq) => $pq->where('name', 'like', '%RGM%'))
+                                 ->orWhereHas('role', fn ($rq) => $rq->where('name', 'like', '%RGM%')->orWhere('code', 'like', '%RGM%'))
+                                 ->orWhere('position', 'like', '%RGM%');
+                          });
+                  });
+            });
+        }
+
         // Field users: only see their own claims
+        return $query->where(function (Builder $q) use ($user, $empId) {
+            $q->where('user_id', $user->id);
+            if ($empId) {
+                $q->orWhere('employee_id', $empId);
+            }
+        });
+    }
+
+    /**
+     * Scope: Hanya pengajuan milik user yang sedang login (pribadi)
+     */
+    public function scopeOwnSubmissionsOnly(Builder $query, ?User $user = null): Builder
+    {
+        $user = $user ?? auth()->user();
+        if (!$user) {
+            return $query->whereRaw('1 = 0');
+        }
+
         $empId = $user->getEffectiveEmployeeId();
         return $query->where(function (Builder $q) use ($user, $empId) {
             $q->where('user_id', $user->id);
@@ -726,6 +889,205 @@ class Claim extends Model
                 $q->orWhere('employee_id', $empId);
             }
         });
+    }
+
+    /**
+     * Scope: Klaim bawahan yang menunggu ACC dari ASM
+     */
+    public function scopePendingAsmApproval(Builder $query, ?User $user = null): Builder
+    {
+        $user = $user ?? auth()->user();
+        if (!$user) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $query->where('approval_status', 'DIAJUKAN');
+
+        // Exclude self-claims
+        $empId = $user->getEffectiveEmployeeId();
+        $query->where('user_id', '!=', $user->id);
+        if ($empId) {
+            $query->where('employee_id', '!=', $empId);
+        }
+
+        // Applicant must be subordinate (not ASM, not RGM)
+        $query->whereHas('employee', function ($eq) {
+            $eq->whereDoesntHave('role', fn ($rq) => $rq->where('code', 'like', '%ASM%')->orWhere('code', 'like', '%RGM%'))
+               ->whereDoesntHave('positionModel', fn ($pq) => $pq->where('name', 'like', '%ASM%')->orWhere('name', 'like', '%RGM%'));
+        });
+
+        if ($user->isSuperAdmin()) {
+            return $query;
+        }
+
+        // Must be under this ASM
+        return $query->where(function (Builder $q) use ($user, $empId) {
+            if ($empId) {
+                $q->whereHas('employee', fn ($eq) => $eq->where('supervisor_id', $empId));
+            }
+            $regions = $user->getRegionList();
+            if (!empty($regions)) {
+                $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
+            }
+        });
+    }
+
+    /**
+     * Scope: Klaim bawahan yang menunggu ACC dari RGM
+     */
+    public function scopePendingRgmApproval(Builder $query, ?User $user = null): Builder
+    {
+        $user = $user ?? auth()->user();
+        if (!$user) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        // Exclude self-claims
+        $empId = $user->getEffectiveEmployeeId();
+        $query->where('user_id', '!=', $user->id);
+        if ($empId) {
+            $query->where('employee_id', '!=', $empId);
+        }
+
+        // Waiting for RGM:
+        // Case A: Sales claim that already got ACC_ASM
+        // Case B: ASM claim with DIAJUKAN (skips ASM)
+        $query->where(function (Builder $q) {
+            $q->where('approval_status', 'ACC_ASM')
+              ->orWhere(function ($sub) {
+                  $sub->where('approval_status', 'DIAJUKAN')
+                      ->whereHas('employee', function ($eq) {
+                          $eq->whereHas('role', fn ($rq) => $rq->where('code', 'like', '%ASM%')->orWhere('name', 'like', '%ASM%'))
+                             ->orWhereHas('positionModel', fn ($pq) => $pq->where('name', 'like', '%ASM%'))
+                             ->orWhere('position', 'like', '%ASM%');
+                      });
+              });
+        });
+
+        if ($user->isSuperAdmin()) {
+            return $query;
+        }
+
+        // Must be under this RGM's supervision or region
+        return $query->where(function (Builder $q) use ($user, $empId) {
+            if ($empId) {
+                $q->whereHas('employee', fn ($eq) => $eq->where('supervisor_id', $empId))
+                  ->orWhereHas('employee.supervisor', fn ($sq) => $sq->where('supervisor_id', $empId));
+            }
+            $regions = $user->getRegionList();
+            if (!empty($regions)) {
+                $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
+            }
+        });
+    }
+
+    /**
+     * Scope: Klaim yang menunggu ACC dari Head of Sales (Pak Jejen)
+     */
+    public function scopePendingJejenApproval(Builder $query, ?User $user = null): Builder
+    {
+        $user = $user ?? auth()->user();
+        if ($user) {
+            $empId = $user->getEffectiveEmployeeId();
+            $query->where('user_id', '!=', $user->id);
+            if ($empId) {
+                $query->where('employee_id', '!=', $empId);
+            }
+        }
+
+        // Waiting for Jejen:
+        // Case A: Claims that reached ACC_RGM
+        // Case B: Claims that reached ACC_ASM
+        // Case C: RGM claims with DIAJUKAN
+        // Case D: ASM claims with DIAJUKAN
+        return $query->where(function (Builder $q) {
+            $q->whereIn('approval_status', ['ACC_RGM', 'ACC_ASM'])
+              ->orWhere(function ($sub) {
+                  $sub->where('approval_status', 'DIAJUKAN')
+                      ->whereHas('employee', function ($eq) {
+                          $eq->whereHas('role', fn ($rq) => $rq->where('code', 'like', '%RGM%')->orWhere('name', 'like', '%RGM%')->orWhere('code', 'like', '%ASM%')->orWhere('name', 'like', '%ASM%'))
+                             ->orWhereHas('positionModel', fn ($pq) => $pq->where('name', 'like', '%RGM%')->orWhere('name', 'like', '%ASM%'))
+                             ->orWhere('position', 'like', '%RGM%')
+                             ->orWhere('position', 'like', '%ASM%');
+                      });
+              });
+        });
+    }
+
+    /**
+     * Scope: Klaim yang menunggu verifikasi dari Admin
+     */
+    public function scopePendingAdminVerification(Builder $query, ?User $user = null): Builder
+    {
+        $user = $user ?? auth()->user();
+        if (!$user) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        $query->whereIn('approval_status', ['ACC_PAK_JEJEN', 'DITOLAK_FINANCE']);
+
+        if ($user->isSuperAdmin()) {
+            return $query;
+        }
+
+        $managedRegions = $user->getManagedRegionsList();
+        return $query->where(function (Builder $q) use ($user, $managedRegions) {
+            $q->where('user_id', $user->id);
+            if (!empty($managedRegions)) {
+                $q->orWhere(function (Builder $sub) use ($managedRegions) {
+                    foreach ($managedRegions as $region) {
+                        $sub->orWhereRaw('UPPER(claims.region) LIKE ?', ['%' . strtoupper($region) . '%'])
+                            ->orWhereRaw('UPPER(claims.homebase) LIKE ?', ['%' . strtoupper($region) . '%'])
+                            ->orWhereRaw('UPPER(claims.city) LIKE ?', ['%' . strtoupper($region) . '%']);
+                    }
+                    $sub->orWhereHas('employee', function (Builder $eq) use ($managedRegions) {
+                        foreach ($managedRegions as $region) {
+                            $eq->orWhereRaw('UPPER(employees.region) LIKE ?', ['%' . strtoupper($region) . '%'])
+                               ->orWhereRaw('UPPER(employees.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    /**
+     * Scope: Klaim yang menunggu pencairan dari Finance
+     */
+    public function scopePendingFinanceDisbursement(Builder $query): Builder
+    {
+        return $query->where('approval_status', 'DISETUJUI')
+                     ->where('disbursement_status', '!=', 'Sudah Dicairkan');
+    }
+
+    /**
+     * Scope: Klaim BBM yang menunggu pencairan / nota balik dari Finance
+     */
+    public function scopePendingFinanceBbmDisbursement(Builder $query): Builder
+    {
+        return $query->where('approval_status', 'DISETUJUI')
+                     ->where('disbursement_status', '!=', 'Sudah Dicairkan')
+                     ->where(function (Builder $q) {
+                         $q->where('claim_category', 'bbm')
+                           ->orWhere('claim_type', 'like', '%BBM%');
+                     });
+    }
+
+    /**
+     * Scope: Klaim Non-BBM yang menunggu pencairan langsung dari Finance
+     */
+    public function scopePendingFinanceNonBbmDisbursement(Builder $query): Builder
+    {
+        return $query->where('approval_status', 'DISETUJUI')
+                     ->where('disbursement_status', '!=', 'Sudah Dicairkan')
+                     ->where(function (Builder $q) {
+                         $q->whereNull('claim_category')
+                           ->orWhere('claim_category', '!=', 'bbm');
+                     })
+                     ->where(function (Builder $q) {
+                         $q->whereNull('claim_type')
+                           ->orWhere('claim_type', 'not like', '%BBM%');
+                     });
     }
 
     /**
@@ -868,13 +1230,6 @@ class Claim extends Model
         return $this->employee ?? $this->claimPeriod?->employee;
     }
 
-    /**
-     * Relation to finance approver
-     */
-    public function financeApprovedBy(): \Illuminate\Database\Eloquent\Relations\BelongsTo
-    {
-        return $this->belongsTo(User::class, 'finance_approved_by_id');
-    }
 
     /**
      * Get fuel compliance assessment for Mobil & Pertalite +5k rules and Pertamax conversion

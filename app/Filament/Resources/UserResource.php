@@ -109,6 +109,22 @@ class UserResource extends Resource
                             }),
                     ])->columns(2),
 
+                Forms\Components\Section::make('Notifikasi Telegram')
+                    ->description('ID Telegram digunakan untuk mengirimkan notifikasi pengajuan dan approval klaim langsung ke pengguna')
+                    ->schema([
+                        Forms\Components\TextInput::make('telegram_chat_id')
+                            ->label('Telegram Chat ID')
+                            ->placeholder('Contoh: 123456789 atau -1001234567890')
+                            ->helperText('Chat ID akun Telegram pengguna. Untuk mengetahui Chat ID: cari bot Anda di Telegram lalu klik Start, atau gunakan bot @userinfobot.')
+                            ->maxLength(100),
+
+                        Forms\Components\TextInput::make('telegram_username')
+                            ->label('Username Telegram (Opsional)')
+                            ->placeholder('Contoh: @hendra_msi')
+                            ->helperText('Sebagai penanda kontak Telegram pengguna.')
+                            ->maxLength(100),
+                    ])->columns(2),
+
                 Forms\Components\Section::make('Autentikasi Login')
                     ->schema([
                         Forms\Components\TextInput::make('email')
@@ -185,6 +201,12 @@ class UserResource extends Resource
                         return $record->region ? [$record->region] : ($record->homebase ? [$record->homebase] : ['-']);
                     })
                     ->separator(', '),
+                Tables\Columns\TextColumn::make('telegram_chat_id')
+                    ->label('Telegram ID')
+                    ->badge()
+                    ->color(fn ($state) => filled($state) ? 'success' : 'gray')
+                    ->formatStateUsing(fn ($state) => filled($state) ? "ID: {$state}" : 'Belum Ada')
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('homebase')
                     ->label('Homebase')
                     ->searchable()
@@ -204,6 +226,46 @@ class UserResource extends Resource
                     ->relationship('role', 'name'),
             ])
             ->actions([
+                Tables\Actions\Action::make('test_telegram')
+                    ->label('Tes Telegram')
+                    ->icon('heroicon-o-paper-airplane')
+                    ->color('info')
+                    ->visible(fn (User $record) => filled($record->telegram_chat_id))
+                    ->requiresConfirmation()
+                    ->modalHeading('Kirim Pesan Uji Coba Telegram')
+                    ->modalDescription(fn (User $record) => "Kirim pesan tes ke akun Telegram {$record->name} (Chat ID: {$record->telegram_chat_id})?")
+                    ->action(function (User $record) {
+                        $telegram = app(\App\Services\TelegramService::class);
+                        if (!$telegram->isEnabled()) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Bot Telegram Belum Dikonfigurasi')
+                                ->body('Isi TELEGRAM_BOT_TOKEN di file .env terlebih dahulu.')
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        $testMsg = "👋 <b>Uji Coba Notifikasi Sistem Klaim MSI</b>\n\n"
+                                 . "Halo <b>{$record->name}</b>!\n"
+                                 . "Akun Telegram Anda (ID: <code>{$record->telegram_chat_id}</code>) telah berhasil terhubung dengan sistem notifikasi pengajuan & persetujuan klaim operasional.\n\n"
+                                 . "⏰ Waktu Uji Coba: " . date('d/m/Y H:i:s');
+
+                        $success = $telegram->sendMessage($record->telegram_chat_id, $testMsg);
+
+                        if ($success) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Pesan Tes Berhasil Terkirim!')
+                                ->body("Notifikasi berhasil dikirimkan ke Telegram {$record->name}.")
+                                ->success()
+                                ->send();
+                        } else {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Gagal Mengirim Pesan')
+                                ->body("Pastikan user telah mengirim /start ke Bot Telegram dan Chat ID sudah benar.")
+                                ->danger()
+                                ->send();
+                        }
+                    }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])

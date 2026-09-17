@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'channel_asm' => env('TELEGRAM_ASM_CHAT_ID'),
+        'channel_rgm' => env('TELEGRAM_RGM_CHAT_ID'),
+        'channel_jejen' => env('TELEGRAM_JEJEN_CHAT_ID'),
+        'channel_admin' => env('TELEGRAM_ADMIN_CHAT_ID'),
+        'channel_finance' => env('TELEGRAM_FINANCE_CHAT_ID'),
+        'channel_default' => env('TELEGRAM_DEFAULT_CHAT_ID'),
+    ],
+
 ];

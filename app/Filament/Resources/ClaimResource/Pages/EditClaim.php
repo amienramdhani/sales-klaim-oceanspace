@@ -13,6 +13,11 @@ class EditClaim extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('export_pdf')
+                ->label('Export PDF')
+                ->icon('heroicon-o-document-arrow-down')
+                ->color('danger')
+                ->action(fn () => app(\App\Services\ClaimPdfExportService::class)->exportSingleClaimPdf($this->record)),
             Actions\DeleteAction::make(),
         ];
     }

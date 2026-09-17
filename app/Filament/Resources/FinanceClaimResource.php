@@ -17,37 +17,11 @@ class FinanceClaimResource extends Resource
 {
     protected static ?string $model = Claim::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-arrow-path-rounded-square';
+    protected static bool $shouldRegisterNavigation = false;
 
-    protected static ?string $navigationGroup = 'PENGAJUAN KLAIM';
-
-    protected static ?string $modelLabel = 'Klaim yang Harus Nota Balik';
-
-    protected static ?string $pluralModelLabel = 'Klaim yang Harus Nota Balik';
-
-    protected static ?int $navigationSort = 2;
-
-    public static function getNavigationLabel(): string
-    {
-        return 'Klaim yang Harus Nota Balik';
-    }
-
-    public static function getNavigationGroup(): ?string
-    {
-        if (auth()->user()?->isFinance()) {
-            return 'MENU FINANCE';
-        }
-        return 'PENGAJUAN KLAIM';
-    }
-
-    /**
-     * Finance, Admin, SuperAdmin dapat mengakses menu Klaim yang Harus Nota Balik
-     */
     public static function canViewAny(): bool
     {
-        $user = auth()->user();
-        if (!$user) return false;
-        return $user->isSuperAdmin() || $user->isAdmin() || $user->isFinance();
+        return false;
     }
 
     public static function canCreate(): bool
@@ -68,23 +42,17 @@ class FinanceClaimResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery()
-            ->with(['employee.role', 'employee.positionModel', 'branch', 'claimPeriod.employee', 'financeApprovedBy'])
-            ->where(function (Builder $q) {
-                $q->where('claim_category', 'bbm')
-                  ->orWhere('claim_category', 'perdin')
-                  ->orWhere('is_perdin', true)
-                  ->orWhere('nota_balik_submitted', true);
-            });
+            ->with(['employee.role', 'employee.positionModel', 'branch', 'claimPeriod.employee', 'financeApprovedBy']);
 
         $user = auth()->user();
         if (!$user) {
             return $query->whereRaw('1 = 0');
         }
 
-        // Finance: Tampilkan data nota balik yang sudah diajukan atau sudah dicairkan
+        // Finance: Hanya menampilkan klaim yang sudah disetujui Admin (DISETUJUI), sedang direvisi Admin (DITOLAK_FINANCE), atau sudah dicairkan
         if ($user->isFinance()) {
             return $query->where(function (Builder $q) {
-                $q->where('approval_status', '!=', 'DRAFT')
+                $q->whereIn('approval_status', ['DISETUJUI', 'DITOLAK_FINANCE'])
                   ->orWhere('disbursement_status', 'Sudah Dicairkan');
             });
         }
@@ -213,6 +181,32 @@ class FinanceClaimResource extends Resource
                         return 'gray';
                     }),
 
+                Tables\Columns\TextColumn::make('claim_category')
+                    ->label('Kategori')
+                    ->badge()
+                    ->formatStateUsing(fn ($state, Claim $record) => match ($state) {
+                        'bbm' => 'BBM',
+                        'perdin' => 'Perdin',
+                        'transport_entertain' => 'Entertain / Transport',
+                        default => $record->claim_type_string ?: 'Klaim',
+                    })
+                    ->color(fn ($state) => match ($state) {
+                        'bbm' => 'warning',
+                        'perdin' => 'info',
+                        'transport_entertain' => 'success',
+                        default => 'gray',
+                    }),
+
+                Tables\Columns\TextColumn::make('approval_status')
+                    ->label('Status Approval')
+                    ->badge()
+                    ->color(fn (string $state): string => match ($state) {
+                        'DISETUJUI' => 'success',
+                        'DITOLAK_FINANCE' => 'danger',
+                        default => 'gray',
+                    })
+                    ->description(fn (Claim $record) => $record->approval_status === 'DITOLAK_FINANCE' && !empty($record->rejection_reason) ? "Catatan: {$record->rejection_reason}" : null),
+
                 Tables\Columns\TextColumn::make('disbursement_status')
                     ->label('Pencairan Bulan Ini')
                     ->badge()
@@ -274,12 +268,42 @@ class FinanceClaimResource extends Resource
                     ->label('Detail')
                     ->color('gray'),
 
-                // 3. Tombol Transfer Dana & Kirim Bukti Transfer
+                // 3. Download Dokumen Khusus Klaim BBM (Word & PDF)
+                Tables\Actions\Action::make('export_bbm_word')
+                    ->label('Word')
+                    ->icon('heroicon-o-document-text')
+                    ->color('info')
+                    ->visible(fn (Claim $record) => $record->claim_category === 'bbm' || str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM'))
+                    ->action(fn (Claim $record) => app(\App\Services\BbmClaimWordExportService::class)->export($record)),
+
+                Tables\Actions\Action::make('export_bbm_pdf')
+                    ->label('PDF')
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->color('danger')
+                    ->visible(fn (Claim $record) => $record->claim_category === 'bbm' || str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM'))
+                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportBbmSinglePdf($record)),
+
+                // 4. Download Dokumen Khusus Klaim Selain BBM (Excel & PDF)
+                Tables\Actions\Action::make('export_excel')
+                    ->label('Excel')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('success')
+                    ->visible(fn (Claim $record) => $record->claim_category !== 'bbm' && !str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM'))
+                    ->action(fn (Claim $record) => app(ClaimExcelExportService::class)->exportSingleClaim($record)),
+
+                Tables\Actions\Action::make('export_pdf')
+                    ->label('PDF')
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->color('danger')
+                    ->visible(fn (Claim $record) => $record->claim_category !== 'bbm' && !str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM'))
+                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportTransportEntertainSinglePdf($record)),
+
+                // 5. Tombol Transfer Dana & Kirim Bukti Transfer
                 Tables\Actions\Action::make('transfer_dana')
                     ->label('Transfer Dana')
                     ->icon('heroicon-o-credit-card')
                     ->color('success')
-                    ->visible(fn (Claim $record) => $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status !== 'DITOLAK')
+                    ->visible(fn (Claim $record) => $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status === 'DISETUJUI')
                     ->modalHeading(fn (Claim $record) => "Kirim Bukti Transfer: " . ($record->effective_employee?->name ?? 'Pemohon'))
                     ->modalDescription(function (Claim $record) {
                         $budget = (float)($record->claim_category === 'bbm' && (float)($record->effective_employee?->bbm_budget ?? 0) > 0 
@@ -311,38 +335,38 @@ class FinanceClaimResource extends Resource
                             'transfer_proof_photo' => $data['transfer_proof_photo'],
                             'finance_approved_by_id' => $user?->id,
                             'finance_approved_at' => now(),
-                            'approval_status' => in_array($record->approval_status, ['DRAFT', 'DIAJUKAN', 'SEDANG_DIREVISI']) ? 'DISETUJUI' : $record->approval_status,
+                            'approval_status' => 'DISETUJUI',
                         ]);
                         Notification::make()->title('Dana berhasil dicairkan dan Bukti Transfer tersimpan!')->success()->send();
                     }),
 
-                // 4. Tombol Tolak Pengajuan dengan Catatan
+                // 6. Tombol Tolak Pengajuan dengan Catatan (Meminta Revisi ke Admin)
                 Tables\Actions\Action::make('tolak_pengajuan')
                     ->label('Tolak')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(fn (Claim $record) => $record->approval_status !== 'DITOLAK')
-                    ->modalHeading(fn (Claim $record) => "Tolak Pengajuan Nota Balik: " . ($record->effective_employee?->name ?? 'Pemohon'))
+                    ->visible(fn (Claim $record) => $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status !== 'DITOLAK_FINANCE')
+                    ->modalHeading(fn (Claim $record) => "Tolak Pengajuan Klaim: " . ($record->effective_employee?->name ?? 'Pemohon'))
                     ->form([
                         Forms\Components\Textarea::make('rejection_reason')
-                            ->label('Catatan / Alasan Penolakan Finance')
-                            ->placeholder('Tuliskan alasan mengapa pengajuan nota balik ini ditolak...')
+                            ->label('Catatan / Alasan Penolakan Finance (Untuk Direvisi Admin)')
+                            ->placeholder('Tuliskan alasan mengapa pengajuan klaim ini ditolak dan perlu direvisi Admin...')
                             ->required()
                             ->rows(3),
                     ])
                     ->action(function (Claim $record, array $data) {
                         $record->update([
-                            'approval_status' => 'DITOLAK',
+                            'approval_status' => 'DITOLAK_FINANCE',
                             'rejection_reason' => $data['rejection_reason'],
                             'disbursement_status' => 'Belum Dicairkan',
                         ]);
-                        Notification::make()->title('Pengajuan klaim berhasil ditolak dengan catatan.')->warning()->send();
+                        Notification::make()->title('Pengajuan klaim berhasil ditolak. Admin dapat merevisi data klaim.')->warning()->send();
                     }),
 
-                // 5. Lihat Bukti Transfer Pencairan (Finance -> User)
+                // 7. Lihat Bukti Transfer Pencairan (Finance -> User)
                 \App\Filament\Actions\ViewTransferProofAction::make(),
 
-                // 6. Lihat Bukti Transfer Pengembalian Sisa (User -> Finance)
+                // 8. Lihat Bukti Transfer Pengembalian Sisa (User -> Finance)
                 \App\Filament\Actions\ViewReturnTransferProofAction::make(),
             ]);
     }

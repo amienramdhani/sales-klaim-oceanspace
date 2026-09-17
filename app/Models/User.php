@@ -35,6 +35,8 @@ class User extends Authenticatable implements FilamentUser
         'homebase',
         'region',
         'managed_regions',
+        'telegram_chat_id',
+        'telegram_username',
     ];
 
     /**

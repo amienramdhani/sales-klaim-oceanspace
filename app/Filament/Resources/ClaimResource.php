@@ -625,11 +625,13 @@ class ClaimResource extends Resource
                         'SEDANG_DIREVISI' => 'info',
                         'ACC_ASM' => 'info',
                         'ACC_RGM' => 'primary',
-                        'ACC_PAK_JEJEN', 'DISETUJUI' => 'success',
+                        'ACC_PAK_JEJEN' => 'indigo',
+                        'DISETUJUI' => 'success',
+                        'DITOLAK_FINANCE' => 'danger',
                         'DITOLAK' => 'danger',
                         default => 'gray',
                     })
-                    ->description(fn (Claim $record) => in_array($record->approval_status, ['DITOLAK', 'SEDANG_DIREVISI']) && !empty($record->rejection_reason) ? "Catatan: {$record->rejection_reason}" : null),
+                    ->description(fn (Claim $record) => in_array($record->approval_status, ['DITOLAK', 'DITOLAK_FINANCE', 'SEDANG_DIREVISI']) && !empty($record->rejection_reason) ? "Catatan: {$record->rejection_reason}" : null),
                 Tables\Columns\TextColumn::make('disbursement_status')
                     ->label('Pencairan')
                     ->badge()
@@ -734,12 +736,13 @@ class ClaimResource extends Resource
                     ->label('Status Approval')
                     ->options([
                         'DRAFT' => 'DRAFT',
-                        'DIAJUKAN' => 'DIAJUKAN',
+                        'DIAJUKAN' => 'DIAJUKAN (Menunggu ACC)',
                         'SEDANG_DIREVISI' => 'SEDANG DIREVISI',
-                        'ACC_ASM' => 'ACC_ASM',
-                        'ACC_RGM' => 'ACC_RGM',
-                        'ACC_PAK_JEJEN' => 'ACC_PAK_JEJEN',
-                        'DISETUJUI' => 'DISETUJUI',
+                        'ACC_ASM' => 'ACC_ASM (Menunggu RGM)',
+                        'ACC_RGM' => 'ACC_RGM (Menunggu Pak Jejen)',
+                        'ACC_PAK_JEJEN' => 'ACC_PAK_JEJEN (Menunggu Verifikasi Admin)',
+                        'DISETUJUI' => 'DISETUJUI (Siap Dicairkan Finance)',
+                        'DITOLAK_FINANCE' => 'DITOLAK FINANCE (Perlu Revisi Admin)',
                         'DITOLAK' => 'DITOLAK',
                     ]),
 
@@ -826,7 +829,7 @@ class ClaimResource extends Resource
                     ->label('Transfer Dana')
                     ->icon('heroicon-o-credit-card')
                     ->color('success')
-                    ->visible(fn (Claim $record) => auth()->user()?->isFinance() && $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status !== 'DITOLAK')
+                    ->visible(fn (Claim $record) => auth()->user()?->isFinance() && $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status === 'DISETUJUI')
                     ->modalHeading(fn (Claim $record) => "Kirim Bukti Transfer: " . ($record->effective_employee?->name ?? 'Pemohon'))
                     ->modalDescription(fn (Claim $record) => "Nominal yang harus ditransfer: Rp " . number_format((float)$record->amount, 0, ',', '.') . ". Silakan unggah foto struk / bukti transfer bank.")
                     ->form([
@@ -853,7 +856,7 @@ class ClaimResource extends Resource
                             'disbursed_at' => now(),
                             'finance_approved_by_id' => $user?->id,
                             'finance_approved_at' => now(),
-                            'approval_status' => in_array($record->approval_status, ['DRAFT', 'DIAJUKAN']) ? 'DISETUJUI' : $record->approval_status,
+                            'approval_status' => 'DISETUJUI',
                         ]);
                         Notification::make()->title('Dana berhasil dicairkan dan Bukti Transfer tersimpan!')->success()->send();
                     }),
@@ -863,22 +866,22 @@ class ClaimResource extends Resource
                     ->label('Tolak')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(fn (Claim $record) => auth()->user()?->isFinance() && $record->approval_status !== 'DITOLAK')
+                    ->visible(fn (Claim $record) => auth()->user()?->isFinance() && $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status !== 'DITOLAK_FINANCE')
                     ->modalHeading(fn (Claim $record) => "Tolak Pengajuan Klaim: " . ($record->effective_employee?->name ?? 'Pemohon'))
                     ->form([
                         Forms\Components\Textarea::make('rejection_reason')
-                            ->label('Catatan / Alasan Penolakan Finance')
+                            ->label('Catatan / Alasan Penolakan Finance (Untuk Direvisi Admin)')
                             ->placeholder('Tuliskan alasan mengapa pengajuan klaim ini ditolak...')
                             ->required()
                             ->rows(3),
                     ])
                     ->action(function (Claim $record, array $data) {
                         $record->update([
-                            'approval_status' => 'DITOLAK',
+                            'approval_status' => 'DITOLAK_FINANCE',
                             'rejection_reason' => $data['rejection_reason'],
                             'disbursement_status' => 'Belum Dicairkan',
                         ]);
-                        Notification::make()->title('Pengajuan klaim berhasil ditolak dengan catatan.')->warning()->send();
+                        Notification::make()->title('Pengajuan klaim berhasil ditolak. Admin dapat merevisi data klaim.')->warning()->send();
                     }),
 
                 // 5. Lihat Bukti Transfer Pembayaran
@@ -889,8 +892,16 @@ class ClaimResource extends Resource
                     ->label('Excel')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('success')
-                    ->visible(fn () => auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin())
+                    ->visible(fn (Claim $record) => (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin() || auth()->user()?->isFinance()) && $record->claim_category !== 'bbm')
                     ->action(fn (Claim $record) => app(ClaimExcelExportService::class)->exportSingleClaim($record)),
+
+                // Action: Export PDF (BBM / Transport & Entertain)
+                Tables\Actions\Action::make('export_pdf')
+                    ->label('Export PDF')
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->color('danger')
+                    ->visible(fn () => auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin() || auth()->user()?->isFinance())
+                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportSingleClaimPdf($record)),
 
                 // Action: Export Form Perdin (Khusus Klaim Perdin)
                 Tables\Actions\Action::make('export_perdin_excel')
@@ -905,7 +916,7 @@ class ClaimResource extends Resource
                     ->label('Word BBM')
                     ->icon('heroicon-o-document-text')
                     ->color('info')
-                    ->visible(fn (Claim $record) => str_contains(strtoupper($record->claim_type_string), 'BBM') || $record->claim_category === 'bbm')
+                    ->visible(fn (Claim $record) => (str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM') || $record->claim_category === 'bbm') && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin() || auth()->user()?->isFinance()))
                     ->action(fn (Claim $record) => app(\App\Services\BbmClaimWordExportService::class)->export($record)),
 
                 // Action: Download Berita Acara (Khusus Klaim BBM)
@@ -913,7 +924,7 @@ class ClaimResource extends Resource
                     ->label('Download BA')
                     ->icon('heroicon-o-document-arrow-down')
                     ->color('danger')
-                    ->visible(fn (Claim $record) => str_contains(strtoupper($record->claim_type_string), 'BBM') || $record->claim_category === 'bbm')
+                    ->visible(fn (Claim $record) => str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM') || $record->claim_category === 'bbm')
                     ->action(fn (Claim $record) => app(\App\Services\BbmBeritaAcaraWordExportService::class)->export($record)),
 
                 // Action Group untuk Approval Workflow & Pencairan (Khusus Admin / SuperAdmin)
@@ -938,7 +949,7 @@ class ClaimResource extends Resource
                         ->label('Mulai Revisi')
                         ->icon('heroicon-o-pencil-square')
                         ->color('warning')
-                        ->visible(fn (Claim $record) => $record->approval_status === 'DITOLAK' && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin() || $record->user_id === auth()->id()))
+                        ->visible(fn (Claim $record) => in_array($record->approval_status, ['DITOLAK', 'DITOLAK_FINANCE']) && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin() || $record->user_id === auth()->id()))
                         ->action(function (Claim $record) {
                             $record->update(['approval_status' => 'SEDANG_DIREVISI']);
                             Notification::make()->title('Status klaim kini Sedang Direvisi. Silakan perbaiki data lalu klik Ajukan Kembali.')->info()->send();
@@ -951,19 +962,50 @@ class ClaimResource extends Resource
                         ->color('warning')
                         ->visible(fn (Claim $record) => in_array($record->approval_status, ['DRAFT', 'DITOLAK', 'SEDANG_DIREVISI']))
                         ->action(function (Claim $record) {
-                            $record->update(['approval_status' => 'DIAJUKAN']);
+                            $record->update([
+                                'approval_status' => 'DIAJUKAN',
+                                'approved_by_asm_id' => null,
+                                'approved_by_asm_at' => null,
+                                'approved_by_rgm_id' => null,
+                                'approved_by_rgm_at' => null,
+                                'approved_by_jejen_id' => null,
+                                'approved_by_jejen_at' => null,
+                                'admin_approved_by_id' => null,
+                                'admin_approved_at' => null,
+                            ]);
                             Notification::make()->title('Klaim berhasil diajukan kembali!')->success()->send();
                         }),
 
-                    // 1.1. Setujui Klaim (Admin / Super Admin)
-                    Tables\Actions\Action::make('approve_claim')
-                        ->label('Setujui Klaim')
-                        ->icon('heroicon-o-check-circle')
+                    // 1.1. Verifikasi & Kirim ke Finance (Admin / Super Admin)
+                    Tables\Actions\Action::make('admin_verify_approve')
+                        ->label('Verifikasi & Kirim ke Finance')
+                        ->icon('heroicon-o-check-badge')
                         ->color('success')
-                        ->visible(fn (Claim $record) => in_array($record->approval_status, ['DIAJUKAN', 'SEDANG_DIREVISI']) && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin()))
+                        ->visible(fn (Claim $record) => $record->approval_status === 'ACC_PAK_JEJEN' && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin()))
                         ->action(function (Claim $record) {
-                            $record->update(['approval_status' => 'DISETUJUI']);
-                            Notification::make()->title('Pengajuan klaim berhasil disetujui!')->success()->send();
+                            $user = auth()->user();
+                            $record->update([
+                                'approval_status' => 'DISETUJUI',
+                                'admin_approved_by_id' => $user?->id,
+                                'admin_approved_at' => now(),
+                            ]);
+                            Notification::make()->title('Pengajuan klaim telah diverifikasi Admin & diteruskan ke Finance!')->success()->send();
+                        }),
+
+                    // 1.2. Kirim Ulang Revisi ke Finance (Setelah Ditolak Finance)
+                    Tables\Actions\Action::make('admin_resubmit_to_finance')
+                        ->label('Kirim Ulang ke Finance')
+                        ->icon('heroicon-o-arrow-path')
+                        ->color('warning')
+                        ->visible(fn (Claim $record) => $record->approval_status === 'DITOLAK_FINANCE' && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin()))
+                        ->action(function (Claim $record) {
+                            $user = auth()->user();
+                            $record->update([
+                                'approval_status' => 'DISETUJUI',
+                                'admin_approved_by_id' => $user?->id,
+                                'admin_approved_at' => now(),
+                            ]);
+                            Notification::make()->title('Revisi klaim berhasil dikirimkan kembali ke Finance!')->success()->send();
                         }),
 
                     // 2. Acc ASM (Alur Sales -> Acc ASM)
@@ -971,7 +1013,7 @@ class ClaimResource extends Resource
                         ->label('Acc ASM')
                         ->icon('heroicon-o-check')
                         ->color('info')
-                        ->visible(fn (Claim $record) => $record->approval_status === 'DIAJUKAN')
+                        ->visible(fn (Claim $record) => $record->approval_status === 'DIAJUKAN' && Claim::isAsmSupervisorOf(auth()->user(), $record))
                         ->action(function (Claim $record) {
                             $user = auth()->user();
                             $record->update([
@@ -987,7 +1029,13 @@ class ClaimResource extends Resource
                         ->label('Acc RGM')
                         ->icon('heroicon-o-check-badge')
                         ->color('primary')
-                        ->visible(fn (Claim $record) => in_array($record->approval_status, ['ACC_ASM', 'DIAJUKAN']))
+                        ->visible(function (Claim $record) {
+                            $user = auth()->user();
+                            if (!Claim::isRgmSupervisorOf($user, $record)) return false;
+                            $applicantEmp = $record->effective_employee;
+                            $isApplicantAsm = ($applicantEmp?->isAsm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'ASM'));
+                            return $isApplicantAsm ? ($record->approval_status === 'DIAJUKAN') : ($record->approval_status === 'ACC_ASM');
+                        })
                         ->action(function (Claim $record) {
                             $user = auth()->user();
                             $record->update([
@@ -1003,7 +1051,13 @@ class ClaimResource extends Resource
                         ->label('Acc Pak Jejen')
                         ->icon('heroicon-o-star')
                         ->color('success')
-                        ->visible(fn (Claim $record) => in_array($record->approval_status, ['ACC_RGM', 'DIAJUKAN']))
+                        ->visible(function (Claim $record) {
+                            $user = auth()->user();
+                            if (!Claim::isJejenApproverOf($user, $record)) return false;
+                            $applicantEmp = $record->effective_employee;
+                            $isApplicantRgm = ($applicantEmp?->isRgm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'RGM'));
+                            return $isApplicantRgm ? ($record->approval_status === 'DIAJUKAN') : ($record->approval_status === 'ACC_RGM');
+                        })
                         ->action(function (Claim $record) {
                             $user = auth()->user();
                             $record->update([

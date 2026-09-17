@@ -33,8 +33,8 @@ class PerdinClaimResource extends Resource
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance()) return false;
-        return $user->isSuperAdmin() || $user->isAdmin() || $user->isAsm() || $user->isRgm() || $user->isSales() || $user->isJejen();
+        if (!$user || $user->isFinance() || $user->isJejen()) return false;
+        return $user->isSuperAdmin() || $user->isAdmin() || $user->isAsm() || $user->isRgm() || $user->isSales();
     }
 
     public static function canCreate(): bool
@@ -146,52 +146,11 @@ class PerdinClaimResource extends Resource
             return $query->visibleToUser($user);
         }
 
-        $empId = $user->getEffectiveEmployeeId();
-        if ($user->isAsm()) {
-            // ASM melihat pengajuannya sendiri + pengajuan dari Sales bawahannya langsung
-            $query->where(function ($q) use ($user, $empId) {
-                $q->where('user_id', $user->id);
-                if ($empId) {
-                    $q->orWhere('employee_id', $empId)
-                      ->orWhereHas('employee', fn ($eq) => $eq->where('supervisor_id', $empId));
-                }
-                $regions = $user->getRegionList();
-                if (!empty($regions)) {
-                    $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
-                }
-            });
-        } elseif ($user->isRgm()) {
-            // RGM melihat pengajuannya sendiri + pengajuan dari ASM bawahannya + Sales di bawah ASM tersebut
-            $query->where(function ($q) use ($user, $empId) {
-                $q->where('user_id', $user->id);
-                if ($empId) {
-                    $q->orWhere('employee_id', $empId)
-                      ->orWhereHas('employee', fn ($eq) => $eq->where('supervisor_id', $empId))
-                      ->orWhereHas('employee.supervisor', fn ($sq) => $sq->where('supervisor_id', $empId));
-                }
-                $regions = $user->getRegionList();
-                if (!empty($regions)) {
-                    $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
-                }
-            });
-        } elseif ($user->isJejen()) {
-            $query->where(function ($q) use ($user, $empId) {
-                $q->where('user_id', $user->id)
-                  ->orWhere('approval_status', 'ACC_RGM');
-                if ($empId) {
-                    $q->orWhere('employee_id', $empId);
-                }
-            });
-        } else {
-            $query->where(function ($q) use ($user, $empId) {
-                $q->where('user_id', $user->id);
-                if ($empId) {
-                    $q->orWhere('employee_id', $empId);
-                }
-            });
+        if ($user->isFieldUser() && !$user->isAdmin() && !$user->isSuperAdmin()) {
+            return $query->ownSubmissionsOnly($user);
         }
 
-        return $query;
+        return $query->visibleToUser($user);
     }
 
     /**
@@ -636,8 +595,10 @@ class PerdinClaimResource extends Resource
                         'DIAJUKAN' => 'warning',
                         'ACC_ASM' => 'info',
                         'ACC_RGM' => 'primary',
-                        'ACC_PAK_JEJEN', 'DISETUJUI' => 'success',
+                        'ACC_PAK_JEJEN' => 'indigo',
+                        'DISETUJUI' => 'success',
                         'SEDANG_DIREVISI' => 'warning',
+                        'DITOLAK_FINANCE' => 'danger',
                         'DITOLAK' => 'danger',
                         default => 'gray',
                     })
@@ -949,6 +910,52 @@ class PerdinClaimResource extends Resource
                         Notification::make()->title('Pengajuan Perdin berhasil diteruskan ke Google Form Management!')->success()->send();
                     }),
 
+                // 4.1 Admin Verifikasi & Setujui -> Kirim ke Finance
+                Tables\Actions\Action::make('admin_verify_approve')
+                    ->label('Verifikasi & Kirim ke Finance')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user || (!$user->isAdmin() && !$user->isSuperAdmin())) return false;
+                        return in_array($record->approval_status, ['ACC_PAK_JEJEN', 'ACC_RGM']);
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Verifikasi & Kirim ke Finance')
+                    ->modalDescription('Pastikan data form perdin dan persetujuan atasan telah sah. Pengajuan akan langsung diteruskan ke antrean Finance untuk pencairan.')
+                    ->action(function (Claim $record) {
+                        $user = auth()->user();
+                        $record->update([
+                            'approval_status' => 'DISETUJUI',
+                            'admin_approved_by_id' => $user?->id,
+                            'admin_approved_at' => now(),
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin telah disetujui Admin dan diteruskan ke Finance!')->success()->send();
+                    }),
+
+                // 4.2 Admin Kirim Ulang ke Finance setelah revisi data
+                Tables\Actions\Action::make('admin_resubmit_to_finance')
+                    ->label('Kirim Ulang ke Finance')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user || (!$user->isAdmin() && !$user->isSuperAdmin())) return false;
+                        return $record->approval_status === 'DITOLAK_FINANCE';
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Kirim Ulang Revisi Perdin ke Finance')
+                    ->modalDescription('Apakah revisi data perdin sudah benar dan siap diajukan kembali ke Finance untuk pencairan?')
+                    ->action(function (Claim $record) {
+                        $user = auth()->user();
+                        $record->update([
+                            'approval_status' => 'DISETUJUI',
+                            'admin_approved_by_id' => $user?->id,
+                            'admin_approved_at' => now(),
+                        ]);
+                        Notification::make()->title('Revisi pengajuan Perdin berhasil dikirimkan kembali ke Finance!')->success()->send();
+                    }),
+
                 // 5. Finance Action: Pencairan Dana & Upload Bukti Transfer
                 Tables\Actions\Action::make('disburse_perdin')
                     ->label('Cairkan Dana')
@@ -1113,6 +1120,12 @@ class PerdinClaimResource extends Resource
                 \App\Filament\Actions\ViewTransferProofAction::make(),
 
                 // 9. Admin Region: Export Excel Realisasi Biaya (Format Voucher Resmi Standar Sama dengan Transport/Entertain)
+                Tables\Actions\Action::make('export_pdf')
+                    ->label('Export PDF')
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->color('danger')
+                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportSingleClaimPdf($record)),
+
                 Tables\Actions\Action::make('export_excel')
                     ->label('Excel')
                     ->icon('heroicon-o-arrow-down-tray')

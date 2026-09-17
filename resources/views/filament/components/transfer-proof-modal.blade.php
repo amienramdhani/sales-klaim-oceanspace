@@ -1,20 +1,47 @@
 <div class="flex flex-col items-center justify-center p-2 text-center">
-    <div class="w-full mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-left text-sm space-y-1">
-        <div class="flex justify-between">
+    <div class="w-full mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-left text-sm space-y-1.5">
+        <div class="flex justify-between items-center">
             <span class="text-gray-500 dark:text-gray-400">Nomor _UID:</span>
             <span class="font-bold font-mono text-emerald-600 dark:text-emerald-400">{{ $record->_uid ?: '-' }}</span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between items-center">
+            <span class="text-gray-500 dark:text-gray-400">Kategori Klaim:</span>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">
+                @if($record->claim_category === 'bbm')
+                    Klaim BBM
+                @elseif($record->claim_category === 'perdin' || $record->is_perdin)
+                    Perjalanan Dinas (Perdin)
+                @else
+                    {{ $record->claim_type_string ?: 'Transport & Entertain' }}
+                @endif
+            </span>
+        </div>
+        <div class="flex justify-between items-center">
             <span class="text-gray-500 dark:text-gray-400">Nama Pemohon:</span>
-            <span class="font-semibold text-gray-900 dark:text-gray-100">{{ $record->effective_employee?->name ?? $record->employee?->name ?? '-' }}</span>
+            <span class="font-semibold text-gray-900 dark:text-gray-100">{{ $record->effective_employee?->name ?? $record->employee?->name ?? '-' }} ({{ $record->effective_employee?->position_name ?? '-' }})</span>
         </div>
-        <div class="flex justify-between">
-            <span class="text-gray-500 dark:text-gray-400">Total Nominal:</span>
-            <span class="font-bold text-gray-900 dark:text-gray-100">Rp {{ number_format((float)$record->amount, 0, ',', '.') }}</span>
+        <div class="flex justify-between items-center">
+            <span class="text-gray-500 dark:text-gray-400">Total Nominal Dicairkan:</span>
+            <span class="font-bold text-base text-emerald-600 dark:text-emerald-400">
+                @php
+                    $disbursedAmount = (float)($record->claim_category === 'bbm' && (float)($record->effective_employee?->bbm_budget ?? 0) > 0 
+                        ? $record->effective_employee?->bbm_budget 
+                        : $record->amount);
+                @endphp
+                Rp {{ number_format($disbursedAmount, 0, ',', '.') }}
+            </span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between items-center">
+            <span class="text-gray-500 dark:text-gray-400">Waktu Pencairan:</span>
+            <span class="text-gray-800 dark:text-gray-200">{{ $record->disbursed_at ? $record->disbursed_at->translatedFormat('d F Y H:i') : '-' }}</span>
+        </div>
+        <div class="flex justify-between items-center">
+            <span class="text-gray-500 dark:text-gray-400">Diproses Oleh Finance:</span>
+            <span class="font-medium text-gray-800 dark:text-gray-200">{{ $record->financeApprovedBy?->name ?? 'Tim Finance' }}</span>
+        </div>
+        <div class="flex justify-between items-center pt-1 border-t border-gray-200 dark:border-gray-700">
             <span class="text-gray-500 dark:text-gray-400">Status Pencairan:</span>
-            <span class="px-2 py-0.5 text-xs rounded-md font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">{{ $record->disbursement_status ?? 'Sudah Dicairkan' }}</span>
+            <span class="px-2 py-0.5 text-xs rounded-md font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">{{ $record->disbursement_status ?? 'Sudah Dicairkan' }}</span>
         </div>
     </div>
 

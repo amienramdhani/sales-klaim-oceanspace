@@ -13,6 +13,11 @@ class EditTransportEntertainClaim extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('export_pdf')
+                ->label('Export PDF')
+                ->icon('heroicon-o-document-arrow-down')
+                ->color('danger')
+                ->action(fn () => app(\App\Services\ClaimPdfExportService::class)->exportTransportEntertainSinglePdf($this->record)),
             Actions\DeleteAction::make(),
         ];
     }

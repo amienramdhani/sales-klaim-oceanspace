@@ -31,6 +31,13 @@ class ClaimPeriodResource extends Resource
 
     protected static ?int $navigationSort = 1;
 
+    public static function canViewAny(): bool
+    {
+        $user = auth()->user();
+        if (!$user || $user->isFinance() || $user->isJejen()) return false;
+        return $user->isSuperAdmin() || $user->isAdmin();
+    }
+
     public static function canCreate(): bool
     {
         $user = auth()->user();
