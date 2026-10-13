@@ -19,14 +19,21 @@ class AttendanceDoc extends Model
         'purpose',
         'date',
         'place',
+        'category',
         'file_path',
         'photos',
+        'receipt_photos',
+        'estimated_amount',
+        'admin_status',
+        'admin_notes',
         'notes',
     ];
 
     protected $casts = [
         'date' => 'date',
         'photos' => 'array',
+        'receipt_photos' => 'array',
+        'estimated_amount' => 'decimal:2',
     ];
 
     protected static function booted(): void
@@ -38,6 +45,12 @@ class AttendanceDoc extends Model
             if (!$doc->employee_id && auth()->check()) {
                 $doc->employee_id = auth()->user()->getEffectiveEmployeeId();
             }
+            if (!$doc->category) {
+                $doc->category = 'Makan';
+            }
+            if (!$doc->admin_status) {
+                $doc->admin_status = 'MENUNGGU_PENYESUAIAN';
+            }
         });
 
         static::deleting(function (AttendanceDoc $doc) {
@@ -48,7 +61,24 @@ class AttendanceDoc extends Model
                     }
                 }
             }
+            if (is_array($doc->receipt_photos)) {
+                foreach ($doc->receipt_photos as $photo) {
+                    if ($photo && \Illuminate\Support\Facades\Storage::disk('public')->exists($photo)) {
+                        \Illuminate\Support\Facades\Storage::disk('public')->delete($photo);
+                    }
+                }
+            }
         });
+    }
+
+    public function isPendingAdminAdjustment(): bool
+    {
+        return empty($this->claim_id) || $this->admin_status === 'MENUNGGU_PENYESUAIAN';
+    }
+
+    public function isAdjusted(): bool
+    {
+        return !empty($this->claim_id) || $this->admin_status === 'SUDAH_DISESUAIKAN';
     }
 
     public function user(): BelongsTo

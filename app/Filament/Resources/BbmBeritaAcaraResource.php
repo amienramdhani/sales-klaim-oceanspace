@@ -22,20 +22,39 @@ class BbmBeritaAcaraResource extends Resource
 
     protected static ?string $navigationGroup = 'PENGAJUAN KLAIM';
 
+    protected static ?string $navigationLabel = 'Berita Acara BBM (BA)';
+
     protected static ?string $modelLabel = 'Berita Acara BBM';
 
     protected static ?string $pluralModelLabel = 'Berita Acara BBM';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 5;
 
     /**
-     * ASM, RGM, Sales, Admin, SuperAdmin dapat mengakses Berita Acara
+     * ASM, RGM, Admin, SuperAdmin dapat mengakses Berita Acara (Sales TIDAK BISA AKSES BBM BA)
      */
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance()) return false;
-        return $user->isSuperAdmin() || $user->isAdmin() || $user->isAsm() || $user->isRgm() || $user->isSales();
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover() || $user->isSales()) return false;
+        return $user->isSuperAdmin() || $user->isAdmin() || $user->isAsm() || $user->isRgm();
+    }
+
+    public static function canCreate(): bool
+    {
+        $user = auth()->user();
+        if (!$user || $user->isFinance() || $user->isSales() || $user->isExecutiveApprover()) return false;
+        return true;
+    }
+
+    public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
+    {
+        $user = auth()->user();
+        if (!$user || $user->isFinance() || $user->isSales() || $user->isExecutiveApprover()) return false;
+        if (in_array($record->approval_status, ['ACC_ASM', 'ACC_RGM', 'ACC_PAK_JEJEN', 'DISETUJUI']) || $record->disbursement_status === 'Sudah Dicairkan') {
+            return false;
+        }
+        return true;
     }
 
     public static function getEloquentQuery(): Builder
@@ -45,8 +64,8 @@ class BbmBeritaAcaraResource extends Resource
             ->with(['employee.role', 'employee.positionModel', 'branch', 'claimPeriod.employee']);
 
         $user = auth()->user();
-        // Hanya Super Admin yang dapat melihat semua data
-        if ($user && !$user->isSuperAdmin()) {
+        // Super Admin & Admin dapat melihat semua data
+        if ($user && !$user->isSuperAdmin() && !$user->isAdmin()) {
             $empId = $user->getEffectiveEmployeeId();
             $query->where(function (Builder $q) use ($user, $empId) {
                 $q->where('user_id', $user->id);
@@ -100,7 +119,7 @@ class BbmBeritaAcaraResource extends Resource
                             ->default('Belum Dicairkan')
                             ->required(),
                     ])->columns(3)
-                    ->extraAttributes(['style' => 'background: #6dbbefff; border-radius: 12px; padding: 1.2rem;']),
+                    ->extraAttributes(['class' => 'bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-xl p-4']),
 
                 // Section 1: Identitas Pemohon & Dokumen
                 Forms\Components\Section::make('Identitas Pemohon & Berita Acara')

@@ -34,7 +34,7 @@ class ClaimPeriodResource extends Resource
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance() || $user->isJejen()) return false;
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
         return $user->isSuperAdmin() || $user->isAdmin();
     }
 
@@ -42,7 +42,7 @@ class ClaimPeriodResource extends Resource
     {
         $user = auth()->user();
         if (!$user) return false;
-        if ($user->isFinance()) return false;
+        if ($user->isFinance() || $user->isExecutiveApprover()) return false;
         return true;
     }
 

@@ -11,6 +11,7 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Hash;
 
 class UserResource extends Resource
@@ -32,6 +33,11 @@ class UserResource extends Resource
         return auth()->user()?->isSuperAdmin() ?? false;
     }
 
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->isSuperAdmin() ?? false;
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -40,18 +46,45 @@ class UserResource extends Resource
                     ->description('ID User dapat dikustomisasi dengan kombinasi huruf dan angka sesuai kebutuhan sistem')
                     ->schema([
                         Forms\Components\TextInput::make('custom_id')
-                            ->label('ID User (Kombinasi Huruf & Angka)')
-                            ->placeholder('Contoh: ADM-001 / RGM-001 / ASM-PWT01 / JEJEN-01')
+                            ->label('ID Karyawan / NIK (Untuk Login)')
                             ->required()
                             ->unique(ignoreRecord: true)
                             ->maxLength(50)
-                            ->helperText('Format bebas: kombinasi huruf dan angka unik.'),
+                            ->placeholder('Contoh: 2024.08.13.01 / ADM-001')
+                            ->helperText('ID unik ini digunakan sebagai username saat login ke sistem.'),
+
+                        Forms\Components\Select::make('employee_id')
+                            ->label('Hubungkan ke Data Karyawan')
+                            ->placeholder('Pilih karyawan untuk menghubungkan akun ini...')
+                            ->relationship('employee', 'name')
+                            ->getOptionLabelFromRecordUsing(fn (\App\Models\Employee $record) => "{$record->name} [NIK: " . ($record->custom_id ?: '-') . "] — " . ($record->role?->name ?? 'Sales'))
+                            ->searchable()
+                            ->preload()
+                            ->nullable()
+                            ->live()
+                            ->afterStateUpdated(function (Forms\Set $set, $state) {
+                                if ($state) {
+                                    $emp = \App\Models\Employee::find($state);
+                                    if ($emp) {
+                                        $set('name', $emp->name);
+                                        if ($emp->custom_id) $set('custom_id', $emp->custom_id);
+                                        if ($emp->homebase) $set('homebase', $emp->homebase);
+                                        if ($emp->region) $set('region', $emp->region);
+                                        if ($emp->email) $set('email', $emp->email);
+                                        if ($emp->badan_usaha) $set('badan_usaha', $emp->badan_usaha);
+                                        if ($emp->managed_branches) $set('managed_branches', $emp->getManagedBranchesList());
+                                        if ($emp->role_id) $set('role_id', $emp->role_id);
+                                    }
+                                }
+                            })
+                            ->helperText('Pilih karyawan agar akun pengguna ini otomatis tersambung dengan profil dan data master karyawan.'),
 
                         Forms\Components\TextInput::make('name')
                             ->label('Nama Pengguna')
                             ->required()
                             ->maxLength(255)
-                            ->placeholder('Contoh: Hendra Setia Permana'),
+                            ->placeholder('Contoh: Hendra Setia Permana')
+                            ->helperText('Nama lengkap pengguna yang akan ditampilkan pada sistem.'),
 
                         Forms\Components\Select::make('role_id')
                             ->label('Role / Peran Pengguna')
@@ -60,13 +93,57 @@ class UserResource extends Resource
                             ->preload()
                             ->required()
                             ->live()
-                            ->helperText('Menentukan hak akses approval dan plafon klaim operasional.'),
+                            ->createOptionForm([
+                                Forms\Components\TextInput::make('name')
+                                    ->label('Nama Role')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->placeholder('Contoh: Supervisor (SPV) / Koordinator Operasional'),
+                                Forms\Components\TextInput::make('code')
+                                    ->label('Kode Role (Unik)')
+                                    ->required()
+                                    ->unique(table: 'roles', column: 'code')
+                                    ->maxLength(50)
+                                    ->placeholder('Contoh: SPV / KOR_OPS'),
+                                Forms\Components\Textarea::make('description')
+                                    ->label('Deskripsi / Tugas Role')
+                                    ->rows(2)
+                                    ->placeholder('Keterangan tanggung jawab dan alur approval...'),
+                                Forms\Components\Select::make('status')
+                                    ->label('Status')
+                                    ->options([
+                                        'Aktif' => 'Aktif',
+                                        'Nonaktif' => 'Nonaktif',
+                                    ])
+                                    ->default('Aktif')
+                                    ->required(),
+                            ])
+                            ->createOptionUsing(function (array $data): int {
+                                return \App\Models\Role::create($data)->getKey();
+                            })
+                            ->helperText('Menentukan hak akses approval dan plafon klaim operasional. Role yang belum terdaftar dapat langsung ditambahkan lewat tombol (+).'),
 
                         Forms\Components\Select::make('employee_id')
                             ->label('Tautkan ke Data Karyawan (Opsional)')
                             ->relationship('employee', 'name')
                             ->searchable()
                             ->preload()
+                            ->reactive()
+                            ->afterStateUpdated(function (Forms\Set $set, $state) {
+                                if ($state) {
+                                    $emp = \App\Models\Employee::find($state);
+                                    if ($emp) {
+                                        if ($emp->custom_id) $set('custom_id', $emp->custom_id);
+                                        if ($emp->name) $set('name', $emp->name);
+                                        if ($emp->homebase) $set('homebase', $emp->homebase);
+                                        if ($emp->region) $set('region', $emp->region);
+                                        if ($emp->email) $set('email', $emp->email);
+                                        if ($emp->badan_usaha) $set('badan_usaha', $emp->badan_usaha);
+                                        if ($emp->managed_branches) $set('managed_branches', $emp->getManagedBranchesList());
+                                        if ($emp->role_id) $set('role_id', $emp->role_id);
+                                    }
+                                }
+                            })
                             ->helperText('Menghubungkan akun login dengan data profil karyawan & tanda tangan.'),
 
                         Forms\Components\TextInput::make('homebase')
@@ -79,33 +156,62 @@ class UserResource extends Resource
                         Forms\Components\Select::make('region')
                             ->label('Data Region Operasional')
                             ->placeholder('Pilih region operasional')
-                            ->helperText('Region operasional pengguna (untuk ASM, RGM, Sales, Finance, dll).')
+                            ->helperText('Region operasional pengguna (untuk Sales, ASM, Finance, dll).')
                             ->options(self::getAvailableRegions())
                             ->searchable()
                             ->preload()
                             ->visible(function (Forms\Get $get, ?User $record) {
                                 $roleId = $get('role_id') ?? $record?->role_id;
-                                if (!$roleId && $record) return !$record->isAdmin();
+                                if (!$roleId && $record) return !$record->isAdmin() && !$record->isRgm();
                                 if (!$roleId) return true;
                                 $role = Role::find($roleId);
-                                return !$role || !in_array(strtoupper($role->code ?? $role->name), ['ADMIN', 'SUPERADMIN', 'ADMINISTRATOR']);
+                                return !$role || !in_array(strtoupper($role->code ?? $role->name), ['ADMIN', 'SUPERADMIN', 'ADMINISTRATOR', 'RGM']);
+                            }),
+
+                        Forms\Components\Select::make('badan_usaha')
+                            ->label('Badan Usaha Perusahaan')
+                            ->options([
+                                'PT MEDIA SELULAR INDONESIA' => 'PT MEDIA SELULAR INDONESIA',
+                                'CV COMPLETE SELULAR' => 'CV COMPLETE SELULAR',
+                                'CV TOP SELULAR' => 'CV TOP SELULAR',
+                            ])
+                            ->default('PT MEDIA SELULAR INDONESIA')
+                            ->required(),
+
+                        Forms\Components\Select::make('managed_branches')
+                            ->label('Cabang Penugasan (Bisa Lebih Dari Satu)')
+                            ->placeholder('Pilih satu atau beberapa cabang penugasan')
+                            ->helperText('Role Sales, ASM, dan RGM dapat ditugaskan pada lebih dari 1 cabang.')
+                            ->options(\App\Models\Branch::orderBy('name')->pluck('name', 'id')->toArray())
+                            ->multiple()
+                            ->searchable()
+                            ->preload()
+                            ->default(fn (?User $record) => $record?->getManagedBranchesList() ?? [])
+                            ->columnSpanFull()
+                            ->visible(function (Forms\Get $get, ?User $record) {
+                                $roleId = $get('role_id') ?? $record?->role_id;
+                                if (!$roleId && $record) return $record->isSales() || $record->isAsm() || $record->isRgm() || $record->isAdmin();
+                                if (!$roleId) return true;
+                                $role = Role::find($roleId);
+                                return $role && in_array(strtoupper($role->code ?? $role->name), ['SALES', 'SLS', 'DSF', 'ASC', 'ASM', 'RGM', 'ADMIN', 'SUPERADMIN']);
                             }),
 
                         Forms\Components\Select::make('managed_regions')
                             ->label('Region yang Dikelola (Bisa Lebih Dari Satu)')
-                            ->placeholder('Pilih satu atau beberapa region yang dipegang Admin')
-                            ->helperText('Role Admin dapat mengelola lebih dari satu region (misal: CIREBON, JATENG, JABO). Klaim dari seluruh region yang dipilih akan masuk untuk diperiksa oleh Admin ini.')
+                            ->placeholder('Pilih satu atau beberapa region yang dipegang Admin / RGM')
+                            ->helperText('Role Admin dan RGM dapat mengelola lebih dari satu region (misal: CIREBON, JATENG, JABO). Klaim dari seluruh region yang dipilih akan masuk untuk diperiksa.')
                             ->options(self::getAvailableRegions())
                             ->multiple()
                             ->searchable()
                             ->preload()
+                            ->default(fn (?User $record) => $record?->getManagedRegionsList() ?? [])
                             ->columnSpanFull()
                             ->visible(function (Forms\Get $get, ?User $record) {
                                 $roleId = $get('role_id') ?? $record?->role_id;
-                                if (!$roleId && $record) return $record->isAdmin();
+                                if (!$roleId && $record) return $record->isAdmin() || $record->isRgm();
                                 if (!$roleId) return false;
                                 $role = Role::find($roleId);
-                                return $role && in_array(strtoupper($role->code ?? $role->name), ['ADMIN', 'SUPERADMIN', 'ADMINISTRATOR']);
+                                return $role && in_array(strtoupper($role->code ?? $role->name), ['ADMIN', 'SUPERADMIN', 'ADMINISTRATOR', 'RGM']);
                             }),
                     ])->columns(2),
 
@@ -125,46 +231,89 @@ class UserResource extends Resource
                             ->maxLength(100),
                     ])->columns(2),
 
-                Forms\Components\Section::make('Autentikasi Login')
+                Forms\Components\Section::make('Autentikasi Login (ID Karyawan/NIK & PIN)')
+                    ->description('Login sistem menggunakan ID Karyawan / NIK dan 6 Digit PIN Keamanan (atau Email & Password untuk Superadmin).')
                     ->schema([
                         Forms\Components\TextInput::make('email')
-                            ->label('Alamat Email')
+                            ->label('Email Kontak / Akun Superadmin')
                             ->email()
                             ->required()
                             ->unique(ignoreRecord: true)
                             ->maxLength(255)
-                            ->placeholder('user@company.com'),
+                            ->placeholder('user@company.com')
+                            ->helperText('Digunakan untuk notifikasi sistem (dan login akun Superadmin).'),
 
                         Forms\Components\TextInput::make('password')
-                            ->label('Kata Sandi')
+                            ->label('Password (Khusus Superadmin)')
                             ->password()
-                            ->dehydrateStateUsing(fn ($state) => filled($state) ? Hash::make($state) : null)
+                            ->revealable()
                             ->dehydrated(fn ($state) => filled($state))
-                            ->required(fn (string $context): bool => $context === 'create')
-                            ->maxLength(255)
-                            ->placeholder('Minimal 8 karakter')
-                            ->helperText('Kosongkan jika tidak ingin mengubah kata sandi saat edit.'),
-                    ])->columns(2),
+                            ->helperText('Diisi jika ingin mengatur/mengubah password akun Superadmin.')
+                            ->visible(function (Forms\Get $get, ?User $record) {
+                                $roleId = $get('role_id') ?? $record?->role_id;
+                                if (!$roleId && $record) return $record->isSuperAdmin();
+                                if (!$roleId) return false;
+                                $role = Role::find($roleId);
+                                return $role && in_array(strtoupper($role->code ?? $role->name), ['SUPERADMIN', 'ADMINISTRATOR']);
+                            }),
+
+                        Forms\Components\TextInput::make('initial_pin')
+                            ->label('PIN Awal (6 Digit Angka)')
+                            ->numeric()
+                            ->length(6)
+                            ->default(fn () => str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT))
+                            ->helperText('Diberikan otomatis oleh sistem untuk login pertama kali.')
+                            ->visible(function (string $context, Forms\Get $get, ?User $record): bool {
+                                if ($context !== 'create') return false;
+                                $roleId = $get('role_id') ?? $record?->role_id;
+                                if (!$roleId) return true;
+                                $role = Role::find($roleId);
+                                return !$role || !in_array(strtoupper($role->code ?? $role->name), ['SUPERADMIN', 'ADMINISTRATOR']);
+                            }),
+
+                        Forms\Components\Toggle::make('must_change_pin')
+                            ->label('Wajib Buat PIN Baru saat Login')
+                            ->default(true)
+                            ->helperText('Jika aktif, pengguna wajib membuat 6 digit PIN baru saat login.')
+                            ->visible(function (Forms\Get $get, ?User $record): bool {
+                                $roleId = $get('role_id') ?? $record?->role_id;
+                                if (!$roleId && $record) return !$record->isSuperAdmin();
+                                if (!$roleId) return true;
+                                $role = Role::find($roleId);
+                                return !$role || !in_array(strtoupper($role->code ?? $role->name), ['SUPERADMIN', 'ADMINISTRATOR']);
+                            }),
+                    ])->columns(3),
             ]);
     }
 
     public static function getAvailableRegions(): array
     {
+        $fromDb = \App\Models\Region::orderBy('name')->pluck('name', 'name')->toArray();
+        if (!empty($fromDb)) {
+            return $fromDb;
+        }
+
         return [
             'CIREBON' => 'CIREBON',
             'JABO' => 'JABO',
             'JABODETABEK' => 'JABODETABEK',
+            'JAKARTA' => 'JAKARTA',
             'JATENG' => 'JATENG',
             'JATIM' => 'JATIM',
             'JOGJA' => 'JOGJA',
             'PURWOKERTO' => 'PURWOKERTO',
-            'JAKARTA' => 'JAKARTA',
+            'SEMARANG' => 'SEMARANG',
+            'SULAWESI' => 'SULAWESI',
             'SUMATERA' => 'SUMATERA',
             'SUMATERA BARAT' => 'SUMATERA BARAT',
             'SUMATRA UTARA & ACEH' => 'SUMATRA UTARA & ACEH',
-            'SULAWESI' => 'SULAWESI',
             'LAMPUNG & BENGKULU' => 'LAMPUNG & BENGKULU',
         ];
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with(['role', 'employee']);
     }
 
     public static function table(Table $table): Table
@@ -172,7 +321,7 @@ class UserResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('custom_id')
-                    ->label('ID User')
+                    ->label('ID Karyawan / NIK')
                     ->badge()
                     ->color('warning')
                     ->searchable()
@@ -183,18 +332,31 @@ class UserResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->weight('bold'),
+                Tables\Columns\TextColumn::make('employee.name')
+                    ->label('Karyawan Terhubung')
+                    ->badge()
+                    ->color(fn (?User $record) => $record?->employee_id ? 'success' : 'gray')
+                    ->state(fn (User $record) => $record->employee?->name ?? 'Akun Sistem / Mandiri')
+                    ->description(fn (User $record) => $record->employee ? "NIK: " . ($record->employee->custom_id ?: '-') : null)
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('role.name')
                     ->label('Role')
                     ->badge()
                     ->color('primary')
                     ->sortable()
                     ->searchable(),
+                Tables\Columns\TextColumn::make('pin_status')
+                    ->label('Status PIN')
+                    ->badge()
+                    ->state(fn (User $record) => $record->must_change_pin ? ("PIN Awal: " . ($record->initial_pin ?: 'Default') . " (Wajib Ubah)") : 'PIN Aktif (Sudah Diubah)')
+                    ->color(fn (User $record) => $record->must_change_pin ? 'warning' : 'success'),
                 Tables\Columns\TextColumn::make('region_display')
                     ->label('Region / Wilayah')
                     ->badge()
                     ->color('info')
                     ->state(function (User $record) {
-                        if ($record->isAdmin()) {
+                        if ($record->isAdmin() || $record->isRgm()) {
                             $list = $record->getManagedRegionsList();
                             return !empty($list) ? $list : ($record->region ? array_map('trim', explode(',', $record->region)) : ['-']);
                         }
@@ -265,6 +427,28 @@ class UserResource extends Resource
                                 ->danger()
                                 ->send();
                         }
+                    }),
+                Tables\Actions\Action::make('reset_pin')
+                    ->label('Reset PIN')
+                    ->icon('heroicon-o-key')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (User $record) => "Reset PIN: {$record->name}")
+                    ->modalDescription('Sistem akan membuatkan 6 digit PIN baru dan mewajibkan pengguna mengganti PIN saat login berikutnya.')
+                    ->action(function (User $record) {
+                        $newPin = str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+                        $record->update([
+                            'password' => \Illuminate\Support\Facades\Hash::make($newPin),
+                            'initial_pin' => $newPin,
+                            'must_change_pin' => true,
+                        ]);
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('PIN Berhasil Direset!')
+                            ->body("PIN Baru untuk {$record->name} (ID: {$record->custom_id}) adalah: {$newPin}. Pengguna diwajibkan membuat PIN baru saat login.")
+                            ->success()
+                            ->persistent()
+                            ->send();
                     }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),

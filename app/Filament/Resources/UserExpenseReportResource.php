@@ -96,7 +96,8 @@ class UserExpenseReportResource extends Resource
                         $used = (float)$record->getUsedBbmForPeriod($month ? (int)$month : null, $year ? (int)$year : null);
                         if ($budget <= 0) return 'gray';
                         return ($budget - $used < 0) ? 'danger' : 'success';
-                    }),
+                    })
+                    ->visibleFrom('md'),
 
                 // 2. Entertain Column
                 Tables\Columns\TextColumn::make('sisa_entertain')
@@ -128,7 +129,8 @@ class UserExpenseReportResource extends Resource
                         $used = (float)$record->getUsedEntertainForPeriod($month ? (int)$month : null, $year ? (int)$year : null, true);
                         if ($budget <= 0) return 'gray';
                         return ($budget - $used < 0) ? 'danger' : 'success';
-                    }),
+                    })
+                    ->visibleFrom('md'),
 
                 // 3. Perdin Column
                 Tables\Columns\TextColumn::make('sisa_perdin')
@@ -160,7 +162,8 @@ class UserExpenseReportResource extends Resource
                         $used = (float)$record->getUsedPerdinForPeriod($month ? (int)$month : null, $year ? (int)$year : null);
                         if ($budget <= 0) return 'gray';
                         return ($budget - $used < 0) ? 'danger' : 'success';
-                    }),
+                    })
+                    ->visibleFrom('md'),
 
                 // 4. Service / Transport Column
                 Tables\Columns\TextColumn::make('sisa_service')
@@ -192,7 +195,8 @@ class UserExpenseReportResource extends Resource
                         $used = (float)$record->getUsedTransportForPeriod($month ? (int)$month : null, $year ? (int)$year : null);
                         if ($budget <= 0) return 'gray';
                         return ($budget - $used < 0) ? 'danger' : 'success';
-                    }),
+                    })
+                    ->visibleFrom('md'),
 
                 // 5. Total Sisa Saldo Column
                 Tables\Columns\TextColumn::make('total_remaining')

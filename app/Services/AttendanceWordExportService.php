@@ -47,7 +47,7 @@ class AttendanceWordExportService
         // Row 1: PERIHAL
         $infoTable->addRow();
         $infoTable->addCell(1800)->addText('PERIHAL', ['name' => 'Aptos', 'bold' => true, 'size' => 9]);
-        $infoTable->addCell(7400)->addText(': ' . strtoupper($doc->purpose), ['name' => 'Aptos', 'bold' => true, 'size' => 9]);
+        $infoTable->addCell(7400)->addText(': ' . strtoupper((string)($doc->purpose ?: '-')), ['name' => 'Aptos', 'bold' => true, 'size' => 9]);
 
         // Row 2: TGL (TANGGAL)
         $infoTable->addRow();
@@ -57,7 +57,7 @@ class AttendanceWordExportService
         // Row 3: TEMPAT
         $infoTable->addRow();
         $infoTable->addCell(1800)->addText('TEMPAT', ['name' => 'Aptos', 'bold' => true, 'size' => 9]);
-        $infoTable->addCell(7400)->addText(': ' . $doc->place, ['name' => 'Aptos', 'size' => 9]);
+        $infoTable->addCell(7400)->addText(': ' . ((string)($doc->place ?: '-')), ['name' => 'Aptos', 'size' => 9]);
 
         $section->addTextBreak(0.5);
 
@@ -197,7 +197,7 @@ class AttendanceWordExportService
             mkdir($tempDir, 0777, true);
         }
 
-        $cleanPurpose = substr(preg_replace('/[^A-Za-z0-9_\-]/', '_', $doc->purpose), 0, 30);
+        $cleanPurpose = substr(preg_replace('/[^A-Za-z0-9_\-]/', '_', (string)($doc->purpose ?: 'Meeting')), 0, 30);
         $fileName = "Daftar_Hadir_{$doc->id}_{$cleanPurpose}.docx";
         $filePath = "{$tempDir}/{$fileName}";
 

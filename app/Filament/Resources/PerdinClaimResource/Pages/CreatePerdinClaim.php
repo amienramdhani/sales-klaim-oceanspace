@@ -17,9 +17,22 @@ class CreatePerdinClaim extends CreateRecord
             $data['employee_id'] = $data['employee_id'] ?? $user->getEffectiveEmployeeId();
             $data['claim_category'] = 'perdin';
             $data['is_perdin'] = true;
-            if (!$user->isAdmin() && !$user->isSuperAdmin()) {
-                $data['approval_status'] = 'DIAJUKAN';
+            $emp = !empty($data['employee_id']) ? \App\Models\Employee::find($data['employee_id']) : null;
+            $isAsm = $user->isAsm() || $emp?->isAsm();
+            $isRgm = $user->isRgm() || $emp?->isRgm();
+
+            if ($isAsm) {
+                $data['approval_status'] = 'ACC_ASM';
+                $data['approved_by_asm_id'] = $user->id;
+                $data['approved_by_asm_at'] = now();
+            } elseif ($isRgm) {
+                $data['approval_status'] = 'ACC_RGM';
+                $data['approved_by_rgm_id'] = $user->id;
+                $data['approved_by_rgm_at'] = now();
+            } else {
+                $data['approval_status'] = $data['approval_status'] ?? 'DIAJUKAN';
             }
+
             $data['region'] = $user->getOperationalRegion();
             $data['homebase'] = $data['homebase'] ?? $user->homebase ?? $user->employee?->homebase;
         }

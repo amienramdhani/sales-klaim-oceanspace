@@ -93,7 +93,8 @@ class RgmClaimApprovalResource extends Resource
                 }
                 $regions = $user->getRegionList();
                 if (!empty($regions)) {
-                    $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
+                    $q->orWhereIn('claims.region', $regions)
+                      ->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
                 }
             });
         }
@@ -110,6 +111,16 @@ class RgmClaimApprovalResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('_uid')
+                    ->label('_UID')
+                    ->badge()
+                    ->color('info')
+                    ->weight('bold')
+                    ->placeholder('-')
+                    ->searchable()
+                    ->sortable()
+                    ->copyable(),
+
                 Tables\Columns\TextColumn::make('claim_category')
                     ->label('Kategori')
                     ->badge()
@@ -135,14 +146,18 @@ class RgmClaimApprovalResource extends Resource
 
                 Tables\Columns\TextColumn::make('effective_employee.name')
                     ->label('Pemohon')
-                    ->description(fn (Claim $record) => ($record->effective_employee?->position_name ?? 'Staff') . ' - ' . ($record->branch?->name ?? $record->region ?? '-'))
+                    ->description(fn (Claim $record) => \Illuminate\Support\Str::limit(
+                        ($record->effective_employee?->position_name ?? 'Staff') . ' - ' . ($record->branch?->name ?? $record->region ?? '-'),
+                        40
+                    ))
                     ->searchable()
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('purpose_string')
                     ->label('Keperluan / Tujuan')
                     ->limit(35)
-                    ->tooltip(fn ($state) => $state),
+                    ->tooltip(fn ($state) => $state)
+                    ->visibleFrom('md'),
 
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Nominal')
@@ -181,7 +196,7 @@ class RgmClaimApprovalResource extends Resource
                 Tables\Filters\SelectFilter::make('claim_category')
                     ->label('Kategori Klaim')
                     ->options([
-                        'bbm' => 'Klaim BBM',
+                        'bbm' => 'Nota Balik BBM',
                         'transport_entertain' => 'Klaim Transport & Entertain',
                         'perdin' => 'Perjalanan Dinas',
                         'service' => 'Service Motor',
@@ -205,26 +220,22 @@ class RgmClaimApprovalResource extends Resource
                 // Lihat Berkas
                 \App\Filament\Actions\ViewClaimFilesAction::make(),
 
-                // Detail
-                Tables\Actions\ViewAction::make()
-                    ->label('Detail')
-                    ->color('gray'),
-
                 // ACC RGM Action
                 Tables\Actions\Action::make('acc_rgm')
                     ->label('ACC RGM')
+                    ->button()
                     ->icon('heroicon-o-check-badge')
-                    ->color('primary')
+                    ->color('success')
                     ->visible(function (Claim $record) {
-                        $isAsmApplicant = $record->effective_employee?->isAsm() ?? false;
+                        $isAsmApplicant = $record->effective_employee?->isAsm() || $record->user?->isAsm();
                         if ($isAsmApplicant) {
-                            return $record->approval_status === 'DIAJUKAN';
+                            return in_array($record->approval_status, ['ACC_ASM', 'DIAJUKAN']);
                         }
                         return $record->approval_status === 'ACC_ASM';
                     })
                     ->requiresConfirmation()
                     ->modalHeading('Konfirmasi Persetujuan RGM')
-                    ->modalDescription(fn (Claim $record) => "Apakah Anda yakin menyetujui klaim senilai Rp " . number_format($record->amount, 0, ',', '.') . " dari " . ($record->effective_employee?->name ?? 'Pemohon') . "? Pengajuan akan diteruskan ke Head of Sales (Pak Jejen).")
+                    ->modalDescription(fn (Claim $record) => "Apakah Anda yakin menyetujui klaim senilai Rp " . number_format($record->amount, 0, ',', '.') . " dari " . ($record->effective_employee?->name ?? 'Pemohon') . "? Pengajuan akan diteruskan ke Admin untuk verifikasi.")
                     ->action(function (Claim $record) {
                         $record->update([
                             'approval_status' => 'ACC_RGM',
@@ -234,7 +245,7 @@ class RgmClaimApprovalResource extends Resource
 
                         Notification::make()
                             ->title('Klaim Berhasil Disetujui RGM')
-                            ->body('Status berubah menjadi ACC RGM dan diteruskan ke Head of Sales.')
+                            ->body('Status berubah menjadi ACC RGM dan diteruskan ke Admin untuk verifikasi.')
                             ->success()
                             ->send();
                     }),
@@ -242,12 +253,13 @@ class RgmClaimApprovalResource extends Resource
                 // Tolak RGM Action
                 Tables\Actions\Action::make('reject_rgm')
                     ->label('Tolak')
+                    ->button()
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
                     ->visible(function (Claim $record) {
-                        $isAsmApplicant = $record->effective_employee?->isAsm() ?? false;
+                        $isAsmApplicant = $record->effective_employee?->isAsm() || $record->user?->isAsm();
                         if ($isAsmApplicant) {
-                            return $record->approval_status === 'DIAJUKAN';
+                            return in_array($record->approval_status, ['ACC_ASM', 'DIAJUKAN']);
                         }
                         return $record->approval_status === 'ACC_ASM';
                     })
@@ -314,8 +326,8 @@ class RgmClaimApprovalResource extends Resource
                     ->action(function (Collection $records) {
                         $count = 0;
                         foreach ($records as $record) {
-                            $isAsm = $record->effective_employee?->isAsm() ?? false;
-                            $canApprove = ($isAsm && $record->approval_status === 'DIAJUKAN') || (!$isAsm && $record->approval_status === 'ACC_ASM');
+                            $isAsm = $record->effective_employee?->isAsm() || $record->user?->isAsm();
+                            $canApprove = ($isAsm && in_array($record->approval_status, ['ACC_ASM', 'DIAJUKAN'])) || (!$isAsm && $record->approval_status === 'ACC_ASM');
 
                             if ($canApprove) {
                                 $record->update([

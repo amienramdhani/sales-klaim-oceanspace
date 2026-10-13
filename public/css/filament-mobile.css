@@ -1,0 +1,1224 @@
+/* ========================================================
+   Filament Mobile Optimization & Bottom Navigation Bar CSS
+   PT. Media Selular Indonesia (Sales Klaim)
+   v6 – Ultra Clean High-Density Mobile Approval Cards
+   ======================================================== */
+
+@media (max-width: 768px) {
+
+    /* 1. Prevent content overlap with bottom navigation bar */
+    body,
+    .fi-main,
+    .fi-main-ctn,
+    .fi-page,
+    .fi-ta-content,
+    .fi-ta-ctn {
+        padding-bottom: 6.5rem !important;
+        overflow-x: hidden !important;
+    }
+
+    /* ========================================================
+       MODAL SYSTEM MOBILE OPTIMIZATION & INTERACTION FIX
+       ======================================================== */
+    /* Container for all modal elements */
+    .fi-modal {
+        position: relative !important;
+        z-index: 9999 !important;
+    }
+
+    /* Modal dialog root element */
+    div[role="dialog"] {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 99999 !important;
+        pointer-events: auto !important;
+    }
+
+    /* Backdrop / dark overlay: stays behind the modal window and allows click dismissal */
+    .fi-modal-close-overlay {
+        z-index: 10 !important;
+        pointer-events: auto !important;
+    }
+
+    /* Wrapper container inside dialog that holds the modal window */
+    div[role="dialog"] > div.fixed {
+        z-index: 20 !important;
+        pointer-events: auto !important;
+        padding: 0.5rem !important;
+    }
+
+    /* Modal window card on mobile */
+    .fi-modal-window {
+        z-index: 30 !important;
+        pointer-events: auto !important;
+        max-height: calc(100dvh - 1.5rem) !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+        margin: 0.5rem auto !important;
+        border-radius: 1rem !important;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4) !important;
+    }
+
+    /* Modal header on mobile: keep fixed at top with safe right space for close button */
+    .fi-modal-header {
+        flex-shrink: 0 !important;
+        position: relative !important;
+        padding-right: 3.75rem !important;
+        border-bottom: 1px solid rgba(156, 163, 175, 0.2) !important;
+    }
+
+    .fi-modal-header .fi-modal-heading {
+        font-size: 0.95rem !important;
+        line-height: 1.35 !important;
+        word-break: break-word !important;
+    }
+
+    /* Modal close button in header ('X'): high z-index, prominent, big touch target */
+    .fi-modal-close-btn {
+        z-index: 50 !important;
+        pointer-events: auto !important;
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 9999px !important;
+        background-color: #fee2e2 !important; /* light red */
+        color: #dc2626 !important; /* red icon */
+        cursor: pointer !important;
+        transition: all 0.15s ease-in-out !important;
+        touch-action: manipulation !important;
+    }
+
+    .dark .fi-modal-close-btn {
+        background-color: rgba(239, 68, 68, 0.25) !important;
+        color: #f87171 !important;
+    }
+
+    .fi-modal-close-btn:hover,
+    .fi-modal-close-btn:active {
+        background-color: #fecaca !important;
+        transform: scale(1.05) !important;
+    }
+
+    /* Modal body content: smooth vertical scrolling, flex grow */
+    .fi-modal-content,
+    .fi-modal-window > div.p-6,
+    .fi-modal-window > div.px-6:not(.fi-modal-header):not(.fi-modal-footer) {
+        flex: 1 1 auto !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        max-height: calc(100dvh - 11rem) !important;
+        padding: 0.875rem !important;
+    }
+
+    /* Modal footer: sticky at bottom, clean button display */
+    .fi-modal-footer {
+        flex-shrink: 0 !important;
+        z-index: 40 !important;
+        padding: 0.75rem 1rem !important;
+        border-top: 1px solid rgba(156, 163, 175, 0.2) !important;
+        background-color: inherit !important;
+    }
+
+    /* Auto-hide bottom bar ONLY when a modal is genuinely OPEN in the DOM */
+    body:has(.fi-modal.fi-modal-open) .mobile-bottom-nav,
+    body.fi-modal-open .mobile-bottom-nav {
+        display: none !important;
+    }
+
+    /* Topbar user avatar neatness */
+    .fi-topbar .fi-user-avatar {
+        width: 32px !important;
+        height: 32px !important;
+        border-radius: 9999px !important;
+    }
+
+    /* --------------------------------------------------------
+       2. TABLE → CARD TRANSFORMATION (BASE)
+       -------------------------------------------------------- */
+    .fi-ta-content {
+        overflow-x: visible !important;
+        padding: 0 !important;
+        border: none !important;
+        background: transparent !important;
+        width: 100% !important;
+    }
+
+    .fi-ta-table {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        border: none !important;
+        background: transparent !important;
+    }
+
+    /* Sembunyikan header tabel di mobile */
+    .fi-ta-table > thead,
+    .fi-ta-table > tfoot {
+        display: none !important;
+    }
+
+    .fi-ta-table > tbody {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.6rem !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0.25rem 0 !important;
+        background: transparent !important;
+        white-space: normal !important;
+    }
+
+    /* --- Base Card for each row --- */
+    .fi-ta-table > tbody > tr.fi-ta-row {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        background: #ffffff !important;
+        border-radius: 0.75rem !important;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+        margin-bottom: 0 !important;
+        padding: 0.65rem 0.75rem !important;
+        position: relative !important;
+        box-sizing: border-box !important;
+        white-space: normal !important;
+        overflow: hidden !important;
+        transition: all 0.15s ease !important;
+    }
+
+    .dark .fi-ta-table > tbody > tr.fi-ta-row {
+        background: #1e293b !important;
+        border-color: #334155 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25) !important;
+    }
+
+    /* Card selected state (bulk action selection) */
+    .fi-ta-table > tbody > tr.fi-ta-row.bg-gray-50,
+    .fi-ta-table > tbody > tr.fi-ta-row[class*="bg-gray-50"] {
+        border-color: #10b981 !important;
+        background: #f0fdf4 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row[class*="bg-gray-50"] {
+        border-color: #059669 !important;
+        background: rgba(6, 78, 59, 0.2) !important;
+    }
+
+    /* --- CRITICAL: Reset Filament's built-in 32px vertical cell padding (px-3 py-4) --- */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell {
+        padding: 0 !important;
+        border: none !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell > div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .fi-ta-col-wrp,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .fi-ta-text,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .px-3,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .py-4,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .whitespace-nowrap {
+        padding: 0 !important;
+        margin: 0 !important;
+        white-space: normal !important;
+    }
+
+    /* Reset inner w-full to prevent blowing up flex row width */
+    /* Reset inner w-full to prevent blowing up flex row width */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-category,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-category div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-type-string,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-type-string div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-category,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-category div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-approval-status,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-approval-status div,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-admin-status,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-admin-status div {
+        width: auto !important;
+        max-width: 100% !important;
+    }
+
+    /* Strictly hide columns with .hidden or hidden class */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.hidden,
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="hidden"] {
+        display: none !important;
+    }
+
+    /* Hide empty cells */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell:empty {
+        display: none !important;
+    }
+
+    /* --------------------------------------------------------
+       3. UNIFIED HIGH-DENSITY CARD LAYOUT FOR ALL ROLES
+       (Sales, ASM, RGM, Head of Sales, Admin, Finance)
+       -------------------------------------------------------- */
+
+    /* ROW 1: Selection Checkbox (Left) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-selection-cell {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 20px !important;
+        min-width: 20px !important;
+        max-width: 20px !important;
+        flex: 0 0 20px !important;
+        order: 1 !important;
+        margin-right: 0.5rem !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-selection-cell .sr-only {
+        display: none !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-selection-cell label {
+        display: flex !important;
+        align-items: center !important;
+        margin: 0 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-selection-cell .fi-checkbox-input,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-selection-cell input[type="checkbox"] {
+        width: 16px !important;
+        height: 16px !important;
+        min-width: 16px !important;
+        border: 1.5px solid #cbd5e1 !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        background-color: #ffffff !important;
+        margin: 0 !important;
+    }
+
+    /* ROW 1: Category / Type Badges (Left) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-category,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-type-string,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-category {
+        display: inline-flex !important;
+        align-items: center !important;
+        width: auto !important;
+        flex: 0 0 auto !important;
+        order: 2 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-category .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-type-string .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-category .fi-badge {
+        font-size: 0.68rem !important;
+        font-weight: 600 !important;
+        padding: 0.15rem 0.5rem !important;
+        border-radius: 9999px !important;
+        letter-spacing: 0.01em !important;
+        line-height: 1.2 !important;
+    }
+
+    /* ROW 1: Date (Right, aligned to end) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        text-align: right !important;
+        width: auto !important;
+        flex: 1 0 auto !important;
+        margin-left: auto !important;
+        order: 3 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date .fi-ta-text-item,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date .fi-ta-text-item-label,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date .fi-ta-text-item,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date .fi-ta-text-item-label {
+        font-size: 0.72rem !important;
+        font-weight: 500 !important;
+        color: #64748b !important;
+        white-space: nowrap !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date .fi-ta-text-item,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-claim-date .fi-ta-text-item-label,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date .fi-ta-text-item,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-date .fi-ta-text-item-label {
+        color: #94a3b8 !important;
+    }
+
+    /* ROW 2: Employee Name & Subtitle / Title (Full Width 100%) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="employee"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="effective-employee"] {
+        display: block !important;
+        width: 100% !important;
+        flex: 0 0 100% !important;
+        order: 4 !important;
+        margin-top: 0.4rem !important;
+        margin-bottom: 0.25rem !important;
+        line-height: 1.25 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="employee"] .fi-ta-text-item,
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="effective-employee"] .fi-ta-text-item {
+        font-size: 0.925rem !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+        display: block !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td[class*="employee"] .fi-ta-text-item,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td[class*="effective-employee"] .fi-ta-text-item {
+        color: #f8fafc !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="employee"] .fi-ta-text-item-description,
+    .fi-ta-table > tbody > tr.fi-ta-row > td[class*="effective-employee"] .fi-ta-text-item-description {
+        font-size: 0.72rem !important;
+        font-weight: 400 !important;
+        color: #64748b !important;
+        margin-top: 0.12rem !important;
+        display: block !important;
+        line-height: 1.25 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td[class*="employee"] .fi-ta-text-item-description,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td[class*="effective-employee"] .fi-ta-text-item-description {
+        color: #94a3b8 !important;
+    }
+
+    /* ROW 3: Context / Purpose / Note / Location (Cleanly structured) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-purpose,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-purpose-string,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-place {
+        display: block !important;
+        width: 100% !important;
+        flex: 0 0 100% !important;
+        order: 5 !important;
+        margin-bottom: 0.3rem !important;
+        font-size: 0.75rem !important;
+        line-height: 1.35 !important;
+        color: #475569 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-purpose,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-purpose-string,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-place {
+        color: #cbd5e1 !important;
+    }
+
+    /* Secondary Badges & Chips (Region, Participants, Fuel Type, etc.) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-region,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-participants-count,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-fuel-type,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-fuel-compliance,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-return-transfer-status {
+        display: inline-flex !important;
+        align-items: center !important;
+        width: auto !important;
+        flex: 0 0 auto !important;
+        order: 5.5 !important;
+        margin-right: 0.35rem !important;
+        margin-bottom: 0.35rem !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-region .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-participants-count .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-fuel-type .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-fuel-compliance .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-return-transfer-status .fi-badge {
+        font-size: 0.65rem !important;
+        padding: 0.12rem 0.4rem !important;
+        line-height: 1.15 !important;
+    }
+
+    /* ROW 4: Nominal (Amount) on Left & Status Badges on Right */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount {
+        display: inline-flex !important;
+        align-items: center !important;
+        width: auto !important;
+        flex: 0 0 auto !important;
+        order: 6 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount .fi-ta-text-item,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount .fi-ta-text-item-label,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount .fi-ta-text-item,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount .fi-ta-text-item-label {
+        font-size: 0.95rem !important;
+        font-weight: 700 !important;
+        color: #059669 !important;
+        letter-spacing: -0.01em !important;
+        white-space: nowrap !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount .fi-ta-text-item,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-amount .fi-ta-text-item-label,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount .fi-ta-text-item,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-estimated-amount .fi-ta-text-item-label {
+        color: #34d399 !important;
+    }
+
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-approval-status,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-disbursement-status,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-admin-status {
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        text-align: right !important;
+        width: auto !important;
+        flex: 0 0 auto !important;
+        margin-left: auto !important;
+        order: 7 !important;
+        gap: 0.25rem !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-approval-status .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-disbursement-status .fi-badge,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-table-cell-admin-status .fi-badge {
+        font-size: 0.68rem !important;
+        font-weight: 600 !important;
+        padding: 0.15rem 0.5rem !important;
+        border-radius: 9999px !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+    }
+
+    /* ROW 5: Actions Bar (Divider + Berkas on left + Buttons on right) -> TAKES FULL ROW (100%) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell {
+        display: block !important;
+        width: 100% !important;
+        flex: 0 0 100% !important;
+        order: 10 !important;
+        margin-top: 0.5rem !important;
+        padding-top: 0.5rem !important;
+        border-top: 1px solid #f1f5f9 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell {
+        border-top-color: #334155 !important;
+    }
+
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ta-actions {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 0.4rem !important;
+        width: 100% !important;
+    }
+
+    /* Pemisah Baris Tegas: Memisahkan Row 1 (Berkas & Aksi) dari Row 2 (Tombol Keputusan ACC / Tolak) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ta-actions::after {
+        content: "" !important;
+        order: 2 !important;
+        width: 100% !important;
+        height: 0 !important;
+        display: block !important;
+        flex-basis: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* 1. Berkas Link / Lampiran (Row 1 - Kiri Atas, order: 1) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ac-link-action,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_claim_files"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_transfer_proof"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_return_transfer_proof"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell a.fi-link {
+        order: 1 !important;
+        flex: 0 0 auto !important;
+        margin: 0 !important;
+        margin-right: auto !important;
+        font-size: 0.72rem !important;
+        font-weight: 600 !important;
+        padding: 0.25rem 0.6rem !important;
+        border-radius: 0.4rem !important;
+        background-color: #f0f9ff !important;
+        border: 1px solid #bae6fd !important;
+        color: #0284c7 !important;
+        text-decoration: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 0.25rem !important;
+        white-space: nowrap !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+        height: 32px !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ac-link-action,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_claim_files"],
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_transfer_proof"],
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_return_transfer_proof"],
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell a.fi-link {
+        background-color: rgba(14, 165, 233, 0.15) !important;
+        border-color: rgba(14, 165, 233, 0.3) !important;
+        color: #38bdf8 !important;
+    }
+
+    /* 2. Dropdown Aksi Trigger (Row 1 - Kanan Atas, order: 1, margin-left: auto) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-dropdown,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ta-action-group {
+        order: 1 !important;
+        flex: 0 0 auto !important;
+        margin: 0 !important;
+        margin-left: auto !important;
+        display: inline-flex !important;
+        align-items: center !important;
+    }
+
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-dropdown-trigger > button,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-icon-btn,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ac-icon-btn-group button,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[aria-haspopup="menu"] {
+        width: auto !important;
+        min-width: 72px !important;
+        height: 32px !important;
+        min-height: 32px !important;
+        padding: 0.25rem 0.65rem !important;
+        border-radius: 0.45rem !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 0.35rem !important;
+        background-color: #f0fdf4 !important;
+        border: 1.5px solid #16a34a !important;
+        color: #15803d !important;
+        font-size: 0.74rem !important;
+        font-weight: 700 !important;
+        cursor: pointer !important;
+        box-shadow: 0 1px 2px rgba(22, 163, 74, 0.12) !important;
+        margin: 0 !important;
+    }
+
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-dropdown-trigger > button,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-icon-btn,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-ac-icon-btn-group button,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[aria-haspopup="menu"] {
+        background-color: rgba(22, 163, 74, 0.15) !important;
+        border-color: #16a34a !important;
+        color: #4ade80 !important;
+    }
+
+    /* Label teks "Aksi" pada tombol titik 3 jika belum ada teks */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-icon-btn:not(:has(span))::after,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-dropdown-trigger > button:not(:has(span))::after,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[aria-haspopup="menu"]:not(:has(span))::after {
+        content: "Aksi" !important;
+        font-size: 0.72rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.01em !important;
+        margin-left: 2px !important;
+    }
+
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-icon-btn svg,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-dropdown-trigger > button svg,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[aria-haspopup="menu"] svg {
+        width: 14px !important;
+        height: 14px !important;
+        flex-shrink: 0 !important;
+    }
+
+    /* 3. Action Buttons (ACC, Tolak, Cairkan, dll.) -> Row 2 (order: 3, 50% split / 100% jika tunggal) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn:not([wire\:click*="view_claim_files"]):not([wire\:click*="view_transfer_proof"]):not([wire\:click*="view_return_transfer_proof"]),
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button.fi-link:not([wire\:click*="view_claim_files"]):not([wire\:click*="view_transfer_proof"]):not([wire\:click*="view_return_transfer_proof"]) {
+        order: 3 !important;
+        flex: 1 1 calc(50% - 0.25rem) !important;
+        min-width: 0 !important;
+        height: 35px !important;
+        min-height: 35px !important;
+        font-size: 0.75rem !important;
+        font-weight: 600 !important;
+        padding: 0.35rem 0.5rem !important;
+        border-radius: 0.45rem !important;
+        line-height: 1.2 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+        gap: 0.25rem !important;
+        white-space: nowrap !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+        margin: 0 !important;
+    }
+
+    /* Warna Tombol ACC / Setujui / Verifikasi / Cairkan (Hijau) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-success,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[class*="color-success"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="acc_"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="admin_verify"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="transfer_dana"] {
+        background-color: #10b981 !important;
+        border: 1px solid #059669 !important;
+        color: #ffffff !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-success:hover,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="acc_"]:hover,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="admin_verify"]:hover,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="transfer_dana"]:hover {
+        background-color: #059669 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="acc_"] svg,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="admin_verify"] svg,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="transfer_dana"] svg {
+        color: #ffffff !important;
+    }
+
+    /* Warna Tombol Tolak (Merah Lembut & Tegas) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-danger,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[class*="color-danger"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="reject_"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="tolak"] {
+        background-color: #fef2f2 !important;
+        border: 1px solid #f87171 !important;
+        color: #dc2626 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-danger,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="reject_"],
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="tolak"] {
+        background-color: rgba(239, 68, 68, 0.15) !important;
+        border-color: #ef4444 !important;
+        color: #fca5a5 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-danger:hover,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="reject_"]:hover,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="tolak"]:hover {
+        background-color: #fee2e2 !important;
+    }
+
+    /* Warna Tombol Warning / Sesuaikan & Buatkan Klaim (Kuning/Amber) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-warning,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[class*="color-warning"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="adjust_and_create_claim"] {
+        background-color: #fef3c7 !important;
+        border: 1px solid #f59e0b !important;
+        color: #b45309 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-warning,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[class*="color-warning"],
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="adjust_and_create_claim"] {
+        background-color: rgba(245, 158, 11, 0.18) !important;
+        border-color: #f59e0b !important;
+        color: #fbbf24 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-warning svg,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="adjust_and_create_claim"] svg {
+        color: #d97706 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-warning svg,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[wire\:click*="adjust_and_create_claim"] svg {
+        color: #fbbf24 !important;
+    }
+
+    /* Warna Tombol Info / Lihat Klaim (Biru) */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-info,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[class*="color-info"],
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_claim"] {
+        background-color: #e0f2fe !important;
+        border: 1px solid #0284c7 !important;
+        color: #0369a1 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-info,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button[class*="color-info"],
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_claim"] {
+        background-color: rgba(2, 132, 199, 0.18) !important;
+        border-color: #38bdf8 !important;
+        color: #38bdf8 !important;
+    }
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-info svg,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_claim"] svg {
+        color: #0284c7 !important;
+    }
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn-color-info svg,
+    .dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell [wire\:click*="view_claim"] svg {
+        color: #38bdf8 !important;
+    }
+
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell .fi-btn .fi-btn-icon,
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-actions-cell button svg {
+        width: 14px !important;
+        height: 14px !important;
+    }
+
+    /* Fallback for other generic tables: Clean stacked layout */
+    .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell:not(.hidden):not(.fi-ta-selection-cell):not(.fi-table-cell-claim-category):not(.fi-table-cell-claim-type-string):not(.fi-table-cell-category):not(.fi-table-cell-claim-date):not(.fi-table-cell-date):not([class*="employee"]):not(.fi-table-cell-purpose):not(.fi-table-cell-purpose-string):not(.fi-table-cell-place):not(.fi-table-cell-participants-count):not(.fi-table-cell-region):not(.fi-table-cell-fuel-type):not(.fi-table-cell-fuel-compliance):not(.fi-table-cell-return-transfer-status):not(.fi-table-cell-amount):not(.fi-table-cell-estimated-amount):not(.fi-table-cell-approval-status):not(.fi-table-cell-disbursement-status):not(.fi-table-cell-admin-status):not(.fi-ta-actions-cell) {
+        display: block !important;
+        width: 100% !important;
+        padding: 0.2rem 0 !important;
+        font-size: 0.8rem !important;
+    }
+
+    /* --------------------------------------------------------
+       4. TOOLBAR (Search + Filter + Bulk Actions)
+       -------------------------------------------------------- */
+    .fi-ta-header-toolbar {
+        flex-wrap: wrap !important;
+        gap: 0.35rem !important;
+        padding: 0.4rem 0.5rem !important;
+    }
+
+    .fi-ta-header-toolbar .fi-ta-actions {
+        flex-wrap: wrap !important;
+        gap: 0.3rem !important;
+    }
+
+    /* Bulk action buttons di toolbar: compact */
+    .fi-ta-header-toolbar .fi-ta-actions .fi-btn {
+        font-size: 0.72rem !important;
+        padding: 0.25rem 0.6rem !important;
+        border-radius: 0.4rem !important;
+    }
+
+    /* Search field: compact */
+    .fi-ta-search-field {
+        min-width: 0 !important;
+        max-width: 50vw !important;
+    }
+
+    .fi-ta-search-field input {
+        font-size: 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
+    }
+
+    /* --------------------------------------------------------
+       5. FORM & REPEATER (Input fields di mobile)
+       -------------------------------------------------------- */
+    .fi-fo-field-wrp {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .fi-fo-field-wrp-label {
+        white-space: normal !important;
+        word-break: break-word !important;
+        line-height: 1.35 !important;
+    }
+
+    .fi-input-wrp {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .fi-fo-repeater-item {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        padding: 0.75rem !important;
+    }
+
+    /* --------------------------------------------------------
+       6. PAGINATION — compact di mobile
+       -------------------------------------------------------- */
+    .fi-ta-pagination {
+        padding-bottom: 1rem !important;
+    }
+
+    /* --------------------------------------------------------
+       7. PAGE HEADER (Judul halaman) — compact
+       -------------------------------------------------------- */
+    .fi-header {
+        padding: 0.35rem 0 !important;
+    }
+
+    .fi-header-heading {
+        font-size: 1.05rem !important;
+    }
+
+    /* --------------------------------------------------------
+       8. TOPBAR
+       -------------------------------------------------------- */
+    .fi-topbar {
+        z-index: 40 !important;
+    }
+}
+
+/* ========================================================
+   Desktop: sembunyikan bottom nav
+   ======================================================== */
+@media (min-width: 769px) {
+    .mobile-bottom-nav {
+        display: none !important;
+    }
+}
+
+/* ========================================================
+   Mobile Bottom Navigation Bar Styles
+   ======================================================== */
+.mobile-bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 35 !important;
+    background-color: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(226, 232, 240, 0.9);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.06);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.dark .mobile-bottom-nav {
+    background-color: rgba(15, 23, 42, 0.95);
+    border-top: 1px solid rgba(51, 65, 85, 0.8);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.mobile-bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.45rem 0.25rem;
+    position: relative;
+    color: #64748b;
+    transition: all 0.18s ease-in-out;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+
+.dark .mobile-bottom-nav-item {
+    color: #94a3b8;
+}
+
+.mobile-bottom-nav-item:active {
+    transform: scale(0.92);
+}
+
+.mobile-bottom-nav-item.is-active {
+    color: #059669 !important;
+    font-weight: 700;
+}
+
+.dark .mobile-bottom-nav-item.is-active {
+    color: #34d399 !important;
+}
+
+.mobile-bottom-nav-item.is-active::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 3px;
+    background-color: #059669;
+    border-radius: 0 0 3px 3px;
+}
+
+.dark .mobile-bottom-nav-item.is-active::after {
+    background-color: #34d399;
+}
+
+.mobile-bottom-nav-label {
+    font-size: 0.65rem;
+    line-height: 0.85rem;
+    margin-top: 0.2rem;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 64px;
+}
+
+.mobile-nav-badge {
+    position: absolute;
+    top: 0.25rem;
+    right: calc(50% - 1.25rem);
+    background-color: #ef4444;
+    color: #ffffff;
+    font-size: 0.625rem;
+    font-weight: 700;
+    border-radius: 9999px;
+    padding: 0.05rem 0.35rem;
+    line-height: 1;
+    border: 1.5px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.35);
+    animation: pulseBadge 2s infinite ease-in-out;
+}
+
+.dark .mobile-nav-badge {
+    border-color: #0f172a;
+}
+
+@keyframes pulseBadge {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+/* ========================================================
+   GLOBAL DROPDOWN & ACTION MENU STYLING (Mobile & Desktop)
+   Fixes: Spacing, Margins, and Vivid Colors for Download Actions
+   ======================================================== */
+.fi-dropdown-panel {
+    border-radius: 0.75rem !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+    border: 1px solid #e2e8f0 !important;
+    background-color: #ffffff !important;
+    padding: 0.45rem !important;
+    min-width: 220px !important;
+    z-index: 99999 !important;
+}
+.dark .fi-dropdown-panel {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+}
+
+.fi-dropdown-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.35rem !important; /* Memberi jarak tegas antar tombol download */
+    padding: 0 !important;
+    list-style: none !important;
+}
+
+/* Individual Dropdown Item */
+.fi-dropdown-list-item {
+    border-radius: 0.5rem !important;
+    padding: 0.5rem 0.75rem !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.6rem !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    transition: all 0.15s ease-in-out !important;
+    border: 1px solid transparent !important;
+    text-decoration: none !important;
+    cursor: pointer !important;
+    margin: 0 !important;
+}
+
+.fi-dropdown-list-item .fi-dropdown-list-item-icon,
+.fi-dropdown-list-item svg {
+    width: 1.15rem !important;
+    height: 1.15rem !important;
+    flex-shrink: 0 !important;
+    transition: transform 0.15s ease !important;
+}
+.fi-dropdown-list-item:hover .fi-dropdown-list-item-icon,
+.fi-dropdown-list-item:hover svg {
+    transform: scale(1.1) !important;
+}
+
+.fi-dropdown-list-item-label {
+    flex: 1 1 auto !important;
+    text-align: left !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+    color: inherit !important;
+}
+
+/* --- EXCEL ACTIONS (Hijau Segar / Emerald) --- */
+.fi-dropdown-list-item.fi-color-success,
+.fi-dropdown-list-item.fi-dropdown-list-item-color-success,
+.fi-dropdown-list-item[wire\:click*="excel"],
+.fi-dropdown-list-item[wire\:click*="Excel"] {
+    color: #15803d !important;
+    background-color: #f0fdf4 !important;
+    border-color: #bbf7d0 !important;
+}
+.fi-dropdown-list-item.fi-color-success:hover,
+.fi-dropdown-list-item[wire\:click*="excel"]:hover,
+.fi-dropdown-list-item[wire\:click*="Excel"]:hover {
+    background-color: #dcfce7 !important;
+    border-color: #86efac !important;
+}
+.fi-dropdown-list-item.fi-color-success .fi-dropdown-list-item-icon,
+.fi-dropdown-list-item.fi-color-success svg,
+.fi-dropdown-list-item[wire\:click*="excel"] svg,
+.fi-dropdown-list-item[wire\:click*="Excel"] svg {
+    color: #16a34a !important;
+}
+.dark .fi-dropdown-list-item.fi-color-success,
+.dark .fi-dropdown-list-item[wire\:click*="excel"],
+.dark .fi-dropdown-list-item[wire\:click*="Excel"] {
+    background-color: rgba(22, 163, 74, 0.15) !important;
+    border-color: rgba(22, 163, 74, 0.3) !important;
+    color: #4ade80 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-success svg,
+.dark .fi-dropdown-list-item[wire\:click*="excel"] svg {
+    color: #4ade80 !important;
+}
+
+/* --- PDF ACTIONS (Merah Tegas / Crimson) --- */
+.fi-dropdown-list-item.fi-color-danger,
+.fi-dropdown-list-item.fi-dropdown-list-item-color-danger,
+.fi-dropdown-list-item[wire\:click*="pdf"],
+.fi-dropdown-list-item[wire\:click*="PDF"] {
+    color: #b91c1c !important;
+    background-color: #fef2f2 !important;
+    border-color: #fecaca !important;
+}
+.fi-dropdown-list-item.fi-color-danger:hover,
+.fi-dropdown-list-item[wire\:click*="pdf"]:hover,
+.fi-dropdown-list-item[wire\:click*="PDF"]:hover {
+    background-color: #fee2e2 !important;
+    border-color: #fca5a5 !important;
+}
+.fi-dropdown-list-item.fi-color-danger .fi-dropdown-list-item-icon,
+.fi-dropdown-list-item.fi-color-danger svg,
+.fi-dropdown-list-item[wire\:click*="pdf"] svg,
+.fi-dropdown-list-item[wire\:click*="PDF"] svg {
+    color: #dc2626 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-danger,
+.dark .fi-dropdown-list-item[wire\:click*="pdf"],
+.dark .fi-dropdown-list-item[wire\:click*="PDF"] {
+    background-color: rgba(220, 38, 38, 0.15) !important;
+    border-color: rgba(220, 38, 38, 0.3) !important;
+    color: #f87171 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-danger svg,
+.dark .fi-dropdown-list-item[wire\:click*="pdf"] svg {
+    color: #f87171 !important;
+}
+
+/* --- WORD ACTIONS (Biru Terang / Sky/Blue) --- */
+.fi-dropdown-list-item.fi-color-info,
+.fi-dropdown-list-item.fi-dropdown-list-item-color-info,
+.fi-dropdown-list-item[wire\:click*="word"],
+.fi-dropdown-list-item[wire\:click*="Word"] {
+    color: #0369a1 !important;
+    background-color: #f0f9ff !important;
+    border-color: #bae6fd !important;
+}
+.fi-dropdown-list-item.fi-color-info:hover,
+.fi-dropdown-list-item[wire\:click*="word"]:hover,
+.fi-dropdown-list-item[wire\:click*="Word"]:hover {
+    background-color: #e0f2fe !important;
+    border-color: #7dd3fc !important;
+}
+.fi-dropdown-list-item.fi-color-info .fi-dropdown-list-item-icon,
+.fi-dropdown-list-item.fi-color-info svg,
+.fi-dropdown-list-item[wire\:click*="word"] svg,
+.fi-dropdown-list-item[wire\:click*="Word"] svg {
+    color: #0284c7 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-info,
+.dark .fi-dropdown-list-item[wire\:click*="word"] {
+    background-color: rgba(2, 132, 199, 0.15) !important;
+    border-color: rgba(2, 132, 199, 0.3) !important;
+    color: #38bdf8 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-info svg,
+.dark .fi-dropdown-list-item[wire\:click*="word"] svg {
+    color: #38bdf8 !important;
+}
+
+/* --- EDIT / REVISI ACTIONS (Kuning Hangat / Amber) --- */
+.fi-dropdown-list-item.fi-color-warning,
+.fi-dropdown-list-item.fi-dropdown-list-item-color-warning,
+.fi-dropdown-list-item[wire\:click*="edit"],
+.fi-dropdown-list-item[wire\:click*="Edit"] {
+    color: #b45309 !important;
+    background-color: #fffbeb !important;
+    border-color: #fde68a !important;
+}
+.fi-dropdown-list-item.fi-color-warning:hover,
+.fi-dropdown-list-item[wire\:click*="edit"]:hover,
+.fi-dropdown-list-item[wire\:click*="Edit"]:hover {
+    background-color: #fef3c7 !important;
+    border-color: #fcd34d !important;
+}
+.fi-dropdown-list-item.fi-color-warning .fi-dropdown-list-item-icon,
+.fi-dropdown-list-item.fi-color-warning svg,
+.fi-dropdown-list-item[wire\:click*="edit"] svg,
+.fi-dropdown-list-item[wire\:click*="Edit"] svg {
+    color: #d97706 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-warning,
+.dark .fi-dropdown-list-item[wire\:click*="edit"] {
+    background-color: rgba(217, 119, 6, 0.15) !important;
+    border-color: rgba(217, 119, 6, 0.3) !important;
+    color: #fbbf24 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-warning svg,
+.dark .fi-dropdown-list-item[wire\:click*="edit"] svg {
+    color: #fbbf24 !important;
+}
+
+/* --- DEFAULT / GRAY ACTIONS --- */
+.fi-dropdown-list-item.fi-color-gray,
+.fi-dropdown-list-item:not(.fi-color-success):not(.fi-color-danger):not(.fi-color-info):not(.fi-color-warning) {
+    color: #334155 !important;
+    background-color: #f8fafc !important;
+    border-color: #e2e8f0 !important;
+}
+.fi-dropdown-list-item.fi-color-gray:hover,
+.fi-dropdown-list-item:not(.fi-color-success):not(.fi-color-danger):not(.fi-color-info):not(.fi-color-warning):hover {
+    background-color: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+}
+.dark .fi-dropdown-list-item.fi-color-gray,
+.dark .fi-dropdown-list-item:not(.fi-color-success):not(.fi-color-danger):not(.fi-color-info):not(.fi-color-warning) {
+    color: #e2e8f0 !important;
+    background-color: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.dark .fi-dropdown-list-item.fi-color-gray:hover,
+.dark .fi-dropdown-list-item:not(.fi-color-success):not(.fi-color-danger):not(.fi-color-info):not(.fi-color-warning):hover {
+    background-color: rgba(255, 255, 255, 0.12) !important;
+    border-color: rgba(255, 255, 255, 0.22) !important;
+    color: #ffffff !important;
+}
+.dark .fi-dropdown-list-item.fi-color-gray svg,
+.dark .fi-dropdown-list-item:not(.fi-color-success):not(.fi-color-danger):not(.fi-color-info):not(.fi-color-warning) svg {
+    color: #94a3b8 !important;
+}
+
+/* Style for ActionGroup trigger button in tables across Desktop & Mobile */
+.fi-ta-actions-cell .fi-dropdown-trigger > button,
+.fi-ta-actions-cell button[aria-haspopup="menu"] {
+    border-radius: 0.45rem !important;
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+    background-color: #f0fdf4 !important;
+    border: 1.5px solid #16a34a !important;
+    color: #15803d !important;
+    padding: 0.3rem 0.75rem !important;
+    box-shadow: 0 1px 2px rgba(22, 163, 74, 0.12) !important;
+    gap: 0.35rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    transition: all 0.15s ease !important;
+    margin-right: 0.25rem !important;
+}
+.fi-ta-actions-cell .fi-dropdown-trigger > button:hover,
+.fi-ta-actions-cell button[aria-haspopup="menu"]:hover {
+    background-color: #dcfce7 !important;
+    border-color: #15803d !important;
+    transform: translateY(-1px) !important;
+}
+.fi-ta-actions-cell .fi-dropdown-trigger > button svg,
+.fi-ta-actions-cell button[aria-haspopup="menu"] svg {
+    color: #16a34a !important;
+    width: 14px !important;
+    height: 14px !important;
+}
+.dark .fi-ta-actions-cell .fi-dropdown-trigger > button,
+.dark .fi-ta-actions-cell button[aria-haspopup="menu"] {
+    background-color: rgba(22, 163, 74, 0.15) !important;
+    border-color: #16a34a !important;
+    color: #4ade80 !important;
+}
+.dark .fi-ta-actions-cell .fi-dropdown-trigger > button svg,
+.dark .fi-ta-actions-cell button[aria-haspopup="menu"] svg {
+    color: #4ade80 !important;
+}
+.dark .fi-ta-actions-cell .fi-dropdown-trigger > button *,
+.dark .fi-ta-actions-cell button[aria-haspopup="menu"] * {
+    color: #4ade80 !important;
+}
+
+/* ========================================================
+   DARK MODE OVERRIDES FOR LEGACY / HARDCODED STYLES
+   ======================================================== */
+.dark [style*="background: #6dbbefff"],
+.dark [style*="background:#6dbbefff"],
+.dark [style*="background: rgb(109, 187, 239)"],
+.dark [style*="background:rgba(109, 187, 239"] {
+    background: rgba(14, 165, 233, 0.15) !important;
+    border: 1px solid rgba(14, 165, 233, 0.35) !important;
+}
+
+/* General fallback for table text in dark mode */
+.dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .fi-ta-text-item,
+.dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .fi-ta-text-item-label {
+    color: #e2e8f0;
+}
+.dark .fi-ta-table > tbody > tr.fi-ta-row > td.fi-ta-cell .fi-ta-text-item-description {
+    color: #94a3b8;
+}
+

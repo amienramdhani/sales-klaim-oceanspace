@@ -22,20 +22,20 @@ class FinanceBbmClaimResource extends Resource
 
     protected static ?string $navigationGroup = 'MENU FINANCE';
 
-    protected static ?string $modelLabel = 'Klaim BBM (Nota Balik)';
+    protected static ?string $modelLabel = 'Nota Balik BBM';
 
-    protected static ?string $pluralModelLabel = 'Klaim BBM (Nota Balik)';
+    protected static ?string $pluralModelLabel = 'Nota Balik BBM';
 
     protected static ?int $navigationSort = 1;
 
     public static function getNavigationLabel(): string
     {
-        return 'Klaim BBM (Nota Balik)';
+        return 'Nota Balik BBM';
     }
 
     public static function getNavigationBadge(): ?string
     {
-        $count = Claim::pendingFinanceBbmDisbursement()->count();
+        $count = cache()->remember('badge_finance_bbm', 10, fn () => Claim::pendingFinanceBbmDisbursement()->count());
         return $count > 0 ? (string) $count : null;
     }
 
@@ -47,7 +47,7 @@ class FinanceBbmClaimResource extends Resource
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isJejen()) return false;
+        if (!$user || $user->isExecutiveApprover()) return false;
         return $user->isSuperAdmin() || $user->isAdmin() || $user->isFinance();
     }
 
@@ -82,10 +82,7 @@ class FinanceBbmClaimResource extends Resource
         }
 
         if ($user->isFinance()) {
-            return $query->where(function (Builder $q) {
-                $q->whereIn('approval_status', ['DISETUJUI', 'DITOLAK_FINANCE'])
-                  ->orWhere('disbursement_status', 'Sudah Dicairkan');
-            });
+            return $query->visibleToFinance($user);
         }
 
         if ($user->isAdmin()) {
@@ -104,6 +101,23 @@ class FinanceBbmClaimResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('_uid')
+                    ->label('_UID')
+                    ->badge()
+                    ->color('info')
+                    ->weight('bold')
+                    ->placeholder('-')
+                    ->searchable()
+                    ->sortable()
+                    ->copyable(),
+
+                Tables\Columns\TextColumn::make('badan_usaha')
+                    ->label('Badan Usaha')
+                    ->badge()
+                    ->color('secondary')
+                    ->placeholder('-')
+                    ->toggleable(isToggledHiddenByDefault: false),
+
                 Tables\Columns\TextColumn::make('claim_date')
                     ->label('Tanggal')
                     ->date('d M Y')
@@ -119,7 +133,8 @@ class FinanceBbmClaimResource extends Resource
                     ->label('BBM & Liter')
                     ->formatStateUsing(fn ($state, Claim $record) => ($state ?: 'BBM') . ($record->fuel_liters > 0 ? " ({$record->fuel_liters} L)" : ''))
                     ->badge()
-                    ->color('info'),
+                    ->color('info')
+                    ->visibleFrom('md'),
 
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Nominal Klaim')
@@ -127,19 +142,18 @@ class FinanceBbmClaimResource extends Resource
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('approval_status')
-                    ->label('Status Approval')
+                    ->label('Status Approval & Tracking')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'DISETUJUI' => 'Siap Dicairkan',
-                        'DITOLAK_FINANCE' => 'Ditolak Finance (Revisi Admin)',
-                        'DITOLAK' => 'Ditolak',
-                        default => $state,
-                    })
+                    ->formatStateUsing(fn (string $state, Claim $record): string => $record->approval_stage_label)
                     ->color(fn (string $state): string => match ($state) {
                         'DISETUJUI' => 'success',
                         'DITOLAK_FINANCE', 'DITOLAK' => 'danger',
+                        'ACC_ASM', 'ACC_RGM', 'ACC_ADMIN' => 'primary',
+                        'ACC_PAK_JEJEN', 'WAITING_YOGA', 'WAITING_THIA', 'WAITING_NURBAITI' => 'indigo',
+                        'SEDANG_DIREVISI', 'DIAJUKAN' => 'warning',
                         default => 'gray',
-                    }),
+                    })
+                    ->description(fn (Claim $record) => $record->approval_journey_summary),
 
                 Tables\Columns\TextColumn::make('disbursement_status')
                     ->label('Status Pencairan')
@@ -182,13 +196,14 @@ class FinanceBbmClaimResource extends Resource
                     ]),
             ])
             ->actions([
-                // Lihat Berkas Nota / Odometer
-                \App\Filament\Actions\ViewClaimFilesAction::make(),
-
-                // Detail
+                // Lihat Detail Pengajuan
                 Tables\Actions\ViewAction::make()
                     ->label('Detail')
-                    ->color('gray'),
+                    ->icon('heroicon-o-eye')
+                    ->color('primary'),
+
+                // Lihat Berkas Nota / Odometer
+                \App\Filament\Actions\ViewClaimFilesAction::make(),
 
                 // Bukti Transfer (jika sudah cair)
                 \App\Filament\Actions\ViewTransferProofAction::make(),
@@ -218,14 +233,23 @@ class FinanceBbmClaimResource extends Resource
                     ->button()
                     ->color('success')
                     ->visible(fn (Claim $record) => $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status === 'DISETUJUI')
-                    ->modalHeading(fn (Claim $record) => "Pencairan Dana BBM: " . ($record->effective_employee?->name ?? 'Pemohon'))
+                    ->modalHeading(fn (Claim $record) => "Pencairan Dana BBM [" . ($record->_uid ?: 'Tanpa UID') . "] - " . ($record->effective_employee?->name ?? 'Pemohon'))
                     ->modalDescription(function (Claim $record) {
+                        $uidText = $record->_uid ? "UID Pengajuan: {$record->_uid}" : "UID: (Belum Ada UID)";
                         $budget = (float)($record->effective_employee?->bbm_budget > 0 
                             ? $record->effective_employee->bbm_budget 
                             : $record->amount);
-                        return "Nominal pencairan dana BBM untuk " . ($record->effective_employee?->name ?? 'Pemohon') . " adalah Rp " . number_format($budget, 0, ',', '.') . ". Harap unggah foto bukti transfer bank berikut:";
+                        return "{$uidText} | Nominal pencairan dana BBM untuk " . ($record->effective_employee?->name ?? 'Pemohon') . " adalah Rp " . number_format($budget, 0, ',', '.') . ". Harap unggah foto bukti transfer bank berikut:";
                     })
                     ->form([
+                        Forms\Components\Placeholder::make('display_uid')
+                            ->label('UID Pengajuan Awal')
+                            ->content(fn (Claim $record) => new \Illuminate\Support\HtmlString(
+                                '<span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-300 border border-sky-300 dark:border-sky-700 tracking-wide">' . 
+                                e($record->_uid ?: '(Tanpa UID Pengajuan)') . 
+                                '</span>'
+                            )),
+
                         Forms\Components\FileUpload::make('transfer_proof_photo')
                             ->label('Foto Bukti Transfer Bank')
                             ->image()
@@ -237,17 +261,12 @@ class FinanceBbmClaimResource extends Resource
                             ->visibility('public')
                             ->required()
                             ->openable(),
-
-                        Forms\Components\TextInput::make('_uid')
-                            ->label('_UID Finance (Opsional)')
-                            ->placeholder('Nomor voucher internal finance'),
                     ])
                     ->action(function (Claim $record, array $data) {
                         $record->update([
                             'disbursement_status' => 'Sudah Dicairkan',
                             'disbursed_at' => now(),
                             'transfer_proof_photo' => $data['transfer_proof_photo'] ?? null,
-                            '_uid' => $data['_uid'] ?? $record->_uid,
                             'finance_approved_by_id' => auth()->id(),
                             'finance_approved_at' => now(),
                         ]);
@@ -280,7 +299,7 @@ class FinanceBbmClaimResource extends Resource
                         ]);
 
                         Notification::make()
-                            ->title('Pengajuan BBM Dikembalikan ke Admin')
+                            ->title('Nota Balik BBM Dikembalikan ke Admin')
                             ->body('Admin dapat merevisi data dan mengirim ulang ke antrean Finance.')
                             ->danger()
                             ->send();

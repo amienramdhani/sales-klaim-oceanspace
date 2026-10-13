@@ -30,10 +30,18 @@ class ClaimResource extends Resource
 
     protected static ?int $navigationSort = 7;
 
+    public static function getNavigationSort(): ?int
+    {
+        if (auth()->user()?->isFinance()) {
+            return 3;
+        }
+        return 7;
+    }
+
     public static function getNavigationLabel(): string
     {
         if (auth()->user()?->isFinance()) {
-            return 'Semua Klaim yang Diajukan';
+            return 'Semua Klaim (Monitoring)';
         }
         return 'Semua Pengajuan Klaim';
     }
@@ -59,22 +67,29 @@ class ClaimResource extends Resource
     public static function canCreate(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance()) return false;
+        if (!$user || $user->isFinance() || $user->isSales() || $user->isExecutiveApprover()) return false;
         return true;
     }
 
     public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance()) return false;
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
         return true;
     }
 
     public static function canDelete(\Illuminate\Database\Eloquent\Model $record): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance()) return false;
-        return $user->isSuperAdmin();
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
+        return $user->isSuperAdmin() || $user->isAdmin();
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        $user = auth()->user();
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
+        return $user->isSuperAdmin() || $user->isAdmin();
     }
 
     public static function getEloquentQuery(): Builder
@@ -126,8 +141,14 @@ class ClaimResource extends Resource
                             ->default('Belum Dicairkan')
                             ->required()
                             ->columnSpan(1),
+
+                        Forms\Components\Textarea::make('rejection_reason')
+                            ->label('Catatan Revisi / Penolakan')
+                            ->columnSpanFull()
+                            ->visible(fn (?Claim $record) => filled($record?->rejection_reason))
+                            ->disabled(),
                     ])->columns(3)
-                    ->extraAttributes(['style' => 'background: #6dbbefff; border-radius: 12px; padding: 1.2rem;']),
+                    ->extraAttributes(['class' => 'bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-xl p-4']),
 
                 Forms\Components\Section::make('Informasi Pemohon & Cabang')
                     ->description('Pilih user/pemohon klaim dan cabang terkait')
@@ -189,22 +210,26 @@ class ClaimResource extends Resource
                         // 4. Brand
                         Forms\Components\TextInput::make('brand')
                             ->label('Brand')
-                            ->placeholder('Contoh: REALME / OPPO'),
+                            ->placeholder('Contoh: REALME / OPPO')
+                            ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || filled($record?->brand)),
 
                         // 5. Reffnote
                         Forms\Components\TextInput::make('reffnote')
                             ->label('Reffnote')
-                            ->placeholder('Contoh: REALME PURWOKERTO'),
+                            ->placeholder('Contoh: REALME PURWOKERTO')
+                            ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || filled($record?->reffnote)),
 
                         // 6. Kota Transaksi
                         Forms\Components\TextInput::make('city')
                             ->label('Kota Utama')
-                            ->placeholder('Contoh: Purwokerto / Cilacap / Semarang'),
+                            ->placeholder('Contoh: Purwokerto / Cilacap / Semarang')
+                            ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || filled($record?->city)),
                     ])->columns(3),
 
                 // SECTION PERJALANAN DINAS (PERDIN)
                 Forms\Components\Section::make('Formulir Perjalanan Dinas (Perdin)')
-                    ->description('Aktifkan jika pengajuan ini merupakan klaim Perjalanan Dinas dengan ketentuan tarif harian (Uang Makan, Penginapan, Tol, BBM, Sewa Mobil, Service)')
+                    ->description('Ketentuan tarif harian (Uang Makan, Penginapan, Tol, BBM, Sewa Mobil, Service)')
+                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (bool)($record?->is_perdin || $record?->claim_category === 'perdin' || filled($record?->destination_city)))
                     ->schema([
                         Forms\Components\Toggle::make('is_perdin')
                             ->label('Jenis Klaim: Perjalanan Dinas')
@@ -231,6 +256,7 @@ class ClaimResource extends Resource
                                     ->suffix('KM')
                                     ->required(fn (Forms\Get $get) => (bool)$get('is_perdin'))
                                     ->helperText('Ketentuan: Minimal jarak 80 km dari homebase')
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->distance_km ?? 0) > 0)
                                     ->rule(function () {
                                         return function (string $attribute, $value, \Closure $fail) {
                                             if ($value < 80) {
@@ -244,6 +270,7 @@ class ClaimResource extends Resource
                                     ->numeric()
                                     ->default(1)
                                     ->live(onBlur: true)
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (int)($record?->days_count ?? 0) > 0)
                                     ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
                                         $empId = $get('employee_id');
                                         if ($empId) {
@@ -258,6 +285,7 @@ class ClaimResource extends Resource
                                     ->numeric()
                                     ->default(0)
                                     ->live(onBlur: true)
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (int)($record?->nights_count ?? 0) > 0)
                                     ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
                                         $empId = $get('employee_id');
                                         if ($empId) {
@@ -272,6 +300,7 @@ class ClaimResource extends Resource
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->meal_allowance ?? 0) > 0)
                                     ->helperText('RGM: 100k/hr, ASM: 75k/hr, ASC: 50k/hr, DSF: 35k/hr'),
 
                                 Forms\Components\TextInput::make('lodging_allowance')
@@ -279,6 +308,7 @@ class ClaimResource extends Resource
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->lodging_allowance ?? 0) > 0)
                                     ->helperText('RGM: 300k/mlm, ASM: 250k/mlm, ASC: 150-200k, DSF: 150k'),
 
                                 Forms\Components\TextInput::make('toll_cost')
@@ -286,34 +316,40 @@ class ClaimResource extends Resource
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
-                                    ->helperText('Standar plafon Rp 500.000 by klaim'),
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->toll_cost ?? 0) > 0),
 
                                 Forms\Components\TextInput::make('fuel_cost')
                                     ->label('Budget Bensin / BBM (Rp)')
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
-                                    ->helperText('Dapat disesuaikan per daerah ASM'),
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->fuel_cost ?? 0) > 0),
 
                                 Forms\Components\TextInput::make('car_rental_cost')
                                     ->label('Kompensasi Sewa Mobil (Rp)')
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
-                                    ->helperText('Disesuaikan per daerah ASM'),
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->car_rental_cost ?? 0) > 0),
 
                                 Forms\Components\TextInput::make('service_cost')
                                     ->label('Kompensasi Service (Rp)')
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
-                                    ->helperText('Mobil Rp 2jt / Motor Rp 500rb per 3 Bulan'),
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->service_cost ?? 0) > 0),
                             ]),
                     ]),
 
                 // SECTION KETENTUAN BBM MOBIL & MOTOR (PERTALITE & +5 RIBU)
                 Forms\Components\Section::make('Ketentuan Khusus BBM (Mobil / Motor)')
                     ->description('Ketentuan Perusahaan: BBM Mobil WAJIB jenis Pertalite dan nominal pengajuan WAJIB dilebihkan Rp 5.000 (contoh: Nota Rp 200.000 maka klaim menjadi Rp 205.000). Pengajuan jenis Pertamax TIDAK DIPERBOLEHKAN.')
+                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (
+                        $record?->claim_category === 'bbm' ||
+                        str_contains(strtoupper($record?->claim_type_string ?? ''), 'BBM') ||
+                        filled($record?->fuel_start_km) ||
+                        filled($record?->fuel_base_amount)
+                    ))
                     ->schema([
                         Forms\Components\Grid::make(4)
                             ->schema([
@@ -352,7 +388,8 @@ class ClaimResource extends Resource
                                     ->numeric()
                                     ->suffix('KM')
                                     ->placeholder('Contoh: 12540')
-                                    ->helperText('Angka odometer sebelum pengisian BBM.'),
+                                    ->helperText('Angka odometer sebelum pengisian BBM.')
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || filled($record?->fuel_start_km)),
 
                                 Forms\Components\TextInput::make('fuel_base_amount')
                                     ->label('Nominal Sesuai Nota (Rp)')
@@ -371,7 +408,8 @@ class ClaimResource extends Resource
                                     ->prefix('Rp')
                                     ->default(5000)
                                     ->disabled()
-                                    ->dehydrated(),
+                                    ->dehydrated()
+                                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (float)($record?->fuel_extra_amount ?? 0) > 0),
                             ]),
 
                         Forms\Components\Placeholder::make('pertamax_warning')
@@ -388,7 +426,10 @@ class ClaimResource extends Resource
                 // SECTION TRANSAKSI UMUM (JIKA BUKAN PERDIN)
                 Forms\Components\Section::make('Rincian Transaksi Klaim Operasional')
                     ->description('Isi rincian pengeluaran: Jenis biaya, Keperluan, Lokasi nota, Brand, Reffnote, dan Nominal')
-                    ->visible(fn (Forms\Get $get) => !(bool)$get('is_perdin'))
+                    ->visible(fn (?Claim $record, string $operation, Forms\Get $get) => $operation === 'create'
+                        ? !(bool)$get('is_perdin')
+                        : (!(bool)($record?->is_perdin || $record?->claim_category === 'perdin') && (!empty($record?->items) || $record?->claim_category !== 'bbm'))
+                    )
                     ->schema([
                         Forms\Components\Repeater::make('items')
                             ->label('Daftar Rincian Pengeluaran')
@@ -413,7 +454,8 @@ class ClaimResource extends Resource
                                     ->label('Kategori Entertain')
                                     ->options([
                                         'Makan' => 'Makan (Jamuan Makan / Meeting - Masuk Rekap Plafon)',
-                                        'Lainnya' => 'Lainnya (Karangan Bunga & Kue Ultah - Non Plafon)',
+                                        'Karangan Bunga' => 'Karangan Bunga (Duka Cita / Ucapan / Grand Opening)',
+                                        'Lainnya' => 'Lainnya (Non Plafon)',
                                     ])
                                     ->default('Makan')
                                     ->visible(fn (Forms\Get $get) => $get('claim_type') === 'Entertain')
@@ -458,7 +500,11 @@ class ClaimResource extends Resource
                                     })
                                     ->placeholder('Contoh: 190000'),
                             ])
-                            ->columns(4)
+                            ->columns([
+                                'default' => 1,
+                                'sm' => 2,
+                                'md' => 4,
+                            ])
                             ->defaultItems(1)
                             ->addActionLabel('Tambah Rincian Transaksi')
                             ->reorderable(false)
@@ -475,9 +521,36 @@ class ClaimResource extends Resource
                             ->columnSpan(2),
                     ]),
 
+                Forms\Components\Section::make('Rekening Tujuan Transfer Lain (Opsional - Toko Bunga / Vendor)')
+                    ->description('Jika klaim berupa karangan bunga atau ingin ditransfer ke rekening toko/pihak lain, isi data rekening di bawah.')
+                    ->icon('heroicon-o-banknotes')
+                    ->collapsed(true)
+                    ->collapsible()
+                    ->schema([
+                        Forms\Components\TextInput::make('custom_bank_account_name')
+                            ->label('Nama Pemilik Rekening Tujuan Lain')
+                            ->placeholder('Contoh: Toko Bunga Florist Lestari / Vendor')
+                            ->helperText('Opsional. Kosongkan jika transfer ditujukan ke rekening pribadi pemohon.'),
+
+                        Forms\Components\TextInput::make('custom_bank_name')
+                            ->label('Nama Bank Tujuan')
+                            ->placeholder('Contoh: BCA / Mandiri / BRI')
+                            ->datalist(['BCA', 'MANDIRI', 'BRI', 'BNI', 'BSI', 'CIMB NIAGA', 'PERMATA', 'DANAMON', 'JAGO', 'SEABANK']),
+
+                        Forms\Components\TextInput::make('custom_bank_account_number')
+                            ->label('Nomor Rekening Tujuan')
+                            ->placeholder('Contoh: 1234567890'),
+                    ])->columns(3),
+
                 // SECTION KHUSUS UPLOAD FOTO BBM (BEFORE & AFTER DIGABUNG)
                 Forms\Components\Section::make('Foto BBM Odometer (Sebelum & Sesudah)')
-                    ->description('Untuk klaim BBM, upload foto sebelum dan sesudah pada masing-masing form di bawah. Sistem akan otomatis menggabungkannya berdampingan menjadi 1 file foto lampiran resmi.')
+                    ->description('Untuk nota balik BBM, upload foto sebelum dan sesudah pada masing-masing form di bawah. Sistem akan otomatis menggabungkannya berdampingan menjadi 1 file foto lampiran resmi.')
+                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || (
+                        filled($record?->bbm_photo_before) ||
+                        filled($record?->bbm_photo_after) ||
+                        $record?->claim_category === 'bbm' ||
+                        str_contains(strtoupper($record?->claim_type_string ?? ''), 'BBM')
+                    ))
                     ->schema([
                         Forms\Components\FileUpload::make('bbm_photo_before')
                             ->label('1. Foto BBM / Odometer Sebelum (Before)')
@@ -509,6 +582,7 @@ class ClaimResource extends Resource
                 // SECTION LAMPIRAN BUKTI TRANSAKSI UMUM
                 Forms\Components\Section::make('Lampiran Bukti Struk / Nota Lainnya')
                     ->description('Upload foto struk, kwitansi, atau bukti fisik pendukung')
+                    ->visible(fn (?Claim $record, string $operation) => $operation === 'create' || !empty($record?->photos) || (!filled($record?->bbm_photo_before) && !filled($record?->bbm_photo_after)))
                     ->schema([
                         Forms\Components\FileUpload::make('photos')
                             ->label('Foto Nota / Struk Pembayaran')
@@ -527,34 +601,6 @@ class ClaimResource extends Resource
                             ->columnSpanFull()
                             ->helperText('Foto yang diunggah akan otomatis dimasukkan ke file Excel dan dokumen pendukung.'),
                     ]),
-
-                // SECTION STATUS APPROVAL & PENCAIRAN
-                Forms\Components\Section::make('Status Alur Approval & Pencairan')
-                    ->schema([
-                        Forms\Components\Select::make('approval_status')
-                            ->label('Status Approval')
-                            ->options([
-                                'DRAFT' => 'DRAFT (Draft Pengajuan)',
-                                'DIAJUKAN' => 'DIAJUKAN (Menunggu Acc)',
-                                'SEDANG_DIREVISI' => 'SEDANG DIREVISI (Perlu Perbaikan / Revisi)',
-                                'ACC_ASM' => 'ACC_ASM (Disetujui ASM - Menunggu Acc RGM)',
-                                'ACC_RGM' => 'ACC_RGM (Disetujui RGM - Menunggu Acc Pak Jejen / Selesai)',
-                                'ACC_PAK_JEJEN' => 'ACC_PAK_JEJEN (Disetujui Pak Jejen / Management)',
-                                'DISETUJUI' => 'DISETUJUI (Selesai Disetujui)',
-                                'DITOLAK' => 'DITOLAK (Ditolak)',
-                            ])
-                            ->default('DRAFT')
-                            ->required(),
-
-                        Forms\Components\Select::make('disbursement_status')
-                            ->label('Status Pencairan Dana')
-                            ->options([
-                                'Belum Dicairkan' => 'Belum Dicairkan',
-                                'Sudah Dicairkan' => 'Sudah Dicairkan',
-                            ])
-                            ->default('Belum Dicairkan')
-                            ->required(),
-                    ])->columns(2),
             ]);
     }
 
@@ -572,7 +618,8 @@ class ClaimResource extends Resource
                     ->color(fn ($state) => $state ? 'success' : 'gray')
                     ->placeholder('-')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->visibleFrom('md'),
                 Tables\Columns\TextColumn::make('employee.name')
                     ->label('Pemohon')
                     ->searchable()
@@ -594,22 +641,26 @@ class ClaimResource extends Resource
                     ->label('Ketentuan BBM')
                     ->state(fn (Claim $record) => $record->fuel_compliance['label'])
                     ->badge()
-                    ->color(fn (Claim $record) => $record->fuel_compliance['color']),
+                    ->color(fn (Claim $record) => $record->fuel_compliance['color'])
+                    ->visibleFrom('md'),
                 Tables\Columns\TextColumn::make('purpose_string')
                     ->label('Keperluan')
                     ->searchable()
                     ->limit(25)
-                    ->tooltip(fn ($record) => $record->purpose_string),
+                    ->tooltip(fn ($record) => $record->purpose_string)
+                    ->visibleFrom('md'),
                 Tables\Columns\TextColumn::make('city')
                     ->label('Kota')
                     ->default('-')
-                    ->searchable(),
+                    ->searchable()
+                    ->visibleFrom('md'),
                 Tables\Columns\TextColumn::make('region')
                     ->label('Region')
                     ->badge()
                     ->color('info')
                     ->state(fn (Claim $record) => $record->region ?: ($record->effective_employee?->region ?: ($record->homebase ?: '-')))
-                    ->sortable(),
+                    ->sortable()
+                    ->visibleFrom('md'),
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Nominal Klaim')
                     ->money('IDR')
@@ -617,21 +668,21 @@ class ClaimResource extends Resource
                     ->weight('bold')
                     ->summarize(Tables\Columns\Summarizers\Sum::make()->money('IDR')->label('Total')),
                 Tables\Columns\TextColumn::make('approval_status')
-                    ->label('Approval')
+                    ->label('Status Approval & Tracking')
                     ->badge()
+                    ->formatStateUsing(fn (string $state, Claim $record): string => $record->approval_stage_label)
                     ->color(fn (string $state): string => match ($state) {
                         'DRAFT' => 'gray',
                         'DIAJUKAN' => 'warning',
-                        'SEDANG_DIREVISI' => 'info',
+                        'SEDANG_DIREVISI' => 'warning',
                         'ACC_ASM' => 'info',
-                        'ACC_RGM' => 'primary',
-                        'ACC_PAK_JEJEN' => 'indigo',
+                        'ACC_RGM', 'ACC_ADMIN' => 'primary',
+                        'ACC_PAK_JEJEN', 'WAITING_YOGA', 'WAITING_NURBAITI', 'WAITING_THIA' => 'indigo',
                         'DISETUJUI' => 'success',
-                        'DITOLAK_FINANCE' => 'danger',
-                        'DITOLAK' => 'danger',
+                        'DITOLAK_FINANCE', 'DITOLAK' => 'danger',
                         default => 'gray',
                     })
-                    ->description(fn (Claim $record) => in_array($record->approval_status, ['DITOLAK', 'DITOLAK_FINANCE', 'SEDANG_DIREVISI']) && !empty($record->rejection_reason) ? "Catatan: {$record->rejection_reason}" : null),
+                    ->description(fn (Claim $record) => $record->approval_journey_summary),
                 Tables\Columns\TextColumn::make('disbursement_status')
                     ->label('Pencairan')
                     ->badge()
@@ -639,7 +690,8 @@ class ClaimResource extends Resource
                         'Sudah Dicairkan' => 'success',
                         'Belum Dicairkan' => 'danger',
                         default => 'gray',
-                    }),
+                    })
+                    ->visibleFrom('md'),
             ])
             ->defaultSort('claim_date', 'desc')
             ->filters([
@@ -819,11 +871,6 @@ class ClaimResource extends Resource
                 // 1. Tombol Lihat Semua Berkas Pengajuan Klaim (Galeri Foto, Struk, Nota, Kwitansi, BA)
                 \App\Filament\Actions\ViewClaimFilesAction::make(),
 
-                // 2. Tombol Detail Form Klaim (Read-Only)
-                Tables\Actions\ViewAction::make()
-                    ->label('Detail')
-                    ->color('gray'),
-
                 // 3. Tombol Transfer Dana & Upload Bukti Transfer (Khusus Role Finance)
                 Tables\Actions\Action::make('finance_transfer')
                     ->label('Transfer Dana')
@@ -962,10 +1009,12 @@ class ClaimResource extends Resource
                         ->color('warning')
                         ->visible(fn (Claim $record) => in_array($record->approval_status, ['DRAFT', 'DITOLAK', 'SEDANG_DIREVISI']))
                         ->action(function (Claim $record) {
+                            $isAsm = $record->effective_employee?->isAsm() || $record->user?->isAsm();
+                            $status = $isAsm ? 'ACC_ASM' : 'DIAJUKAN';
                             $record->update([
-                                'approval_status' => 'DIAJUKAN',
-                                'approved_by_asm_id' => null,
-                                'approved_by_asm_at' => null,
+                                'approval_status' => $status,
+                                'approved_by_asm_id' => $isAsm ? ($record->user_id ?? auth()->id()) : null,
+                                'approved_by_asm_at' => $isAsm ? now() : null,
                                 'approved_by_rgm_id' => null,
                                 'approved_by_rgm_at' => null,
                                 'approved_by_jejen_id' => null,
@@ -976,20 +1025,20 @@ class ClaimResource extends Resource
                             Notification::make()->title('Klaim berhasil diajukan kembali!')->success()->send();
                         }),
 
-                    // 1.1. Verifikasi & Kirim ke Finance (Admin / Super Admin)
+                    // 1.1. Verifikasi & Kirim ke Pak Jejen (Admin / Super Admin)
                     Tables\Actions\Action::make('admin_verify_approve')
-                        ->label('Verifikasi & Kirim ke Finance')
+                        ->label('Verifikasi & Kirim ke Pak Jejen')
                         ->icon('heroicon-o-check-badge')
                         ->color('success')
-                        ->visible(fn (Claim $record) => $record->approval_status === 'ACC_PAK_JEJEN' && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin()))
+                        ->visible(fn (Claim $record) => (in_array($record->approval_status, ['ACC_RGM', 'DITOLAK_FINANCE']) || ($record->approval_status === 'DIAJUKAN' && ($record->effective_employee?->isRgm() || $record->user?->isRgm()))) && (auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin()))
                         ->action(function (Claim $record) {
                             $user = auth()->user();
                             $record->update([
-                                'approval_status' => 'DISETUJUI',
+                                'approval_status' => 'ACC_ADMIN',
                                 'admin_approved_by_id' => $user?->id,
                                 'admin_approved_at' => now(),
                             ]);
-                            Notification::make()->title('Pengajuan klaim telah diverifikasi Admin & diteruskan ke Finance!')->success()->send();
+                            Notification::make()->title('Pengajuan klaim telah diverifikasi Admin & diteruskan ke Head of Sales (Pak Jejen)!')->success()->send();
                         }),
 
                     // 1.2. Kirim Ulang Revisi ke Finance (Setelah Ditolak Finance)
@@ -1021,7 +1070,7 @@ class ClaimResource extends Resource
                                 'approved_by_asm_id' => $user?->id,
                                 'approved_by_asm_at' => now(),
                             ]);
-                            Notification::make()->title('Klaim telah di-ACC oleh ASM!')->info()->send();
+                            Notification::make()->title('Klaim telah di-ACC oleh ASM! Diteruskan ke RGM.')->info()->send();
                         }),
 
                     // 3. Acc RGM (Alur ASM -> Acc RGM / Sales -> Acc ASM -> Acc RGM)
@@ -1033,8 +1082,8 @@ class ClaimResource extends Resource
                             $user = auth()->user();
                             if (!Claim::isRgmSupervisorOf($user, $record)) return false;
                             $applicantEmp = $record->effective_employee;
-                            $isApplicantAsm = ($applicantEmp?->isAsm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'ASM'));
-                            return $isApplicantAsm ? ($record->approval_status === 'DIAJUKAN') : ($record->approval_status === 'ACC_ASM');
+                            $isApplicantAsm = ($applicantEmp?->isAsm() || $record->user?->isAsm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'ASM'));
+                            return $isApplicantAsm ? in_array($record->approval_status, ['ACC_ASM', 'DIAJUKAN']) : ($record->approval_status === 'ACC_ASM');
                         })
                         ->action(function (Claim $record) {
                             $user = auth()->user();
@@ -1043,10 +1092,10 @@ class ClaimResource extends Resource
                                 'approved_by_rgm_id' => $user?->id,
                                 'approved_by_rgm_at' => now(),
                             ]);
-                            Notification::make()->title('Klaim telah di-ACC oleh RGM!')->success()->send();
+                            Notification::make()->title('Klaim telah di-ACC oleh RGM! Diteruskan ke Admin untuk verifikasi.')->success()->send();
                         }),
 
-                    // 4. Acc Pak Jejen (Alur RGM -> Acc Pak Jejen)
+                    // 4. Acc Pak Jejen (Head of Sales) -> Teruskan sesuai Badan Usaha
                     Tables\Actions\Action::make('acc_jejen')
                         ->label('Acc Pak Jejen')
                         ->icon('heroicon-o-star')
@@ -1054,18 +1103,86 @@ class ClaimResource extends Resource
                         ->visible(function (Claim $record) {
                             $user = auth()->user();
                             if (!Claim::isJejenApproverOf($user, $record)) return false;
-                            $applicantEmp = $record->effective_employee;
-                            $isApplicantRgm = ($applicantEmp?->isRgm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'RGM'));
-                            return $isApplicantRgm ? ($record->approval_status === 'DIAJUKAN') : ($record->approval_status === 'ACC_RGM');
+                            return $record->approval_status === 'ACC_ADMIN';
+                        })
+                        ->action(function (Claim $record) {
+                            $user = auth()->user();
+                            $isTop = $record->isTopSelular();
+
+                            if ($isTop) {
+                                $nextStatus = 'WAITING_THIA';
+                                $msg = 'Klaim telah disetujui Head of Sales (Pak Jejen)! Diteruskan ke Manajer Keuangan (Bu Thia Aisyah).';
+                            } else {
+                                $nextStatus = 'WAITING_YOGA';
+                                $msg = 'Klaim telah disetujui Head of Sales (Pak Jejen)! Diteruskan ke Manager Finance (Pak Yoga P. Hadi).';
+                            }
+
+                            $record->update([
+                                'approval_status' => $nextStatus,
+                                'approved_by_jejen_id' => $user?->id,
+                                'approved_by_jejen_at' => now(),
+                            ]);
+                            Notification::make()->title($msg)->success()->send();
+                        }),
+
+                    // 4.1.A ACC Manager Finance (Pak Yoga P. Hadi - PT MSI)
+                    Tables\Actions\Action::make('approve_yoga')
+                        ->label('ACC Pak Yoga')
+                        ->icon('heroicon-o-check-circle')
+                        ->color('success')
+                        ->visible(function (Claim $record) {
+                            $user = auth()->user();
+                            if (!$user) return false;
+                            return $record->approval_status === 'WAITING_YOGA' && ($user->isYoga() || $user->isSuperAdmin());
                         })
                         ->action(function (Claim $record) {
                             $user = auth()->user();
                             $record->update([
-                                'approval_status' => 'ACC_PAK_JEJEN',
-                                'approved_by_jejen_id' => $user?->id,
-                                'approved_by_jejen_at' => now(),
+                                'approval_status' => 'WAITING_NURBAITI',
+                                'approved_by_yoga_id' => $user?->id,
+                                'approved_by_yoga_at' => now(),
                             ]);
-                            Notification::make()->title('Klaim telah di-ACC oleh Pak Jejen!')->success()->send();
+                            Notification::make()->title('Klaim disetujui Pak Yoga! Diteruskan ke Bu Nurbaeti Riaseha (Finance Coordinator).')->success()->send();
+                        }),
+
+                    // 4.1.B ACC Finance Coordinator (Bu Nurbaeti Riaseha - PT MSI)
+                    Tables\Actions\Action::make('approve_nurbaiti')
+                        ->label('ACC Bu Nurbaeti')
+                        ->icon('heroicon-o-check-circle')
+                        ->color('success')
+                        ->visible(function (Claim $record) {
+                            $user = auth()->user();
+                            if (!$user) return false;
+                            return $record->approval_status === 'WAITING_NURBAITI' && ($user->isNurbaiti() || $user->isSuperAdmin());
+                        })
+                        ->action(function (Claim $record) {
+                            $user = auth()->user();
+                            $record->update([
+                                'approval_status' => 'DISETUJUI',
+                                'approved_by_nurbaiti_id' => $user?->id,
+                                'approved_by_nurbaiti_at' => now(),
+                            ]);
+                            Notification::make()->title('Klaim disetujui Bu Nurbaeti! Diteruskan ke antrean pencairan Finance PT Media Selular Indonesia.')->success()->send();
+                        }),
+
+                    // 4.1.C ACC Manajer Keuangan (Thia Aisyah - CV Top Selular)
+                    Tables\Actions\Action::make('approve_thia')
+                        ->label('ACC Bu Thia')
+                        ->icon('heroicon-o-check-circle')
+                        ->color('success')
+                        ->visible(function (Claim $record) {
+                            $user = auth()->user();
+                            if (!$user) return false;
+                            return $record->approval_status === 'WAITING_THIA' && ($user->isThia() || $user->isSuperAdmin());
+                        })
+                        ->action(function (Claim $record) {
+                            $user = auth()->user();
+                            $record->update([
+                                'approval_status' => 'DISETUJUI',
+                                'approved_by_thia_id' => $user?->id,
+                                'approved_by_thia_at' => now(),
+                            ]);
+                            Notification::make()->title('Klaim disetujui Bu Thia! Diteruskan ke antrean pencairan Finance CV Top Selular.')->success()->send();
                         }),
 
                     // 5. Tolak Pengajuan

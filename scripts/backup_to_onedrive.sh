@@ -105,7 +105,7 @@ DB_BACKUP_SUCCESS=false
 DB_SIZE="0 KB"
 if command -v mysqldump &> /dev/null && [ -n "$DB_DATABASE" ] && [ -n "$DB_USERNAME" ]; then
     log "Membuat dump database: ${DB_DATABASE}..."
-    MYSQL_PWD="${DB_PASSWORD}" mysqldump -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USERNAME}" "${DB_DATABASE}" 2>/dev/null | gzip > "${TEMP_DIR}/${ARCHIVE_DB_NAME}" || true
+    MYSQL_PWD="${DB_PASSWORD}" mysqldump --no-tablespaces -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USERNAME}" "${DB_DATABASE}" 2>/dev/null | gzip > "${TEMP_DIR}/${ARCHIVE_DB_NAME}" || true
     if [ -f "${TEMP_DIR}/${ARCHIVE_DB_NAME}" ] && [ -s "${TEMP_DIR}/${ARCHIVE_DB_NAME}" ]; then
         DB_SIZE=$(du -h "${TEMP_DIR}/${ARCHIVE_DB_NAME}" | cut -f1)
         DB_BACKUP_SUCCESS=true
@@ -126,7 +126,8 @@ fi
 
 if [ "$DB_BACKUP_SUCCESS" = true ]; then
     if ! rclone copy "${TEMP_DIR}/${ARCHIVE_DB_NAME}" "${ONEDRIVE_REMOTE}:${ONEDRIVE_FOLDER}/archives" --retries 3 --low-level-retries 10; then
-        log "WARNING: Gagal mengupload arsip database ke OneDrive!"
+        log "ERROR: Gagal mengupload arsip database ke OneDrive!"
+        UPLOAD_SUCCESS=false
     fi
 fi
 

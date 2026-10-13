@@ -81,36 +81,10 @@ class ClaimPeriod extends Model
             return $query->whereRaw('1 = 0');
         }
 
-        if ($user->isSuperAdmin()) {
+        if ($user->isSuperAdmin() || $user->isAdmin()) {
             return $query;
         }
 
-        if ($user->isAdmin()) {
-            $managedRegions = $user->getManagedRegionsList();
-
-            return $query->where(function (Builder $q) use ($user, $managedRegions) {
-                $q->where('user_id', $user->id);
-
-                if (!empty($managedRegions)) {
-                    $q->orWhereHas('employee', function (Builder $empQuery) use ($managedRegions) {
-                        $empQuery->where(function (Builder $eq) use ($managedRegions) {
-                            foreach ($managedRegions as $region) {
-                                $eq->orWhereRaw('UPPER(employees.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                                   ->orWhereRaw('UPPER(employees.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
-                            }
-                        });
-                    });
-                    $q->orWhereHas('user', function (Builder $uQuery) use ($managedRegions) {
-                        $uQuery->where(function (Builder $uq) use ($managedRegions) {
-                            foreach ($managedRegions as $region) {
-                                $uq->orWhereRaw('UPPER(users.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                                   ->orWhereRaw('UPPER(users.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
-                            }
-                        });
-                    });
-                }
-            });
-        }
 
         $empId = $user->getEffectiveEmployeeId();
         return $query->where(function (Builder $q) use ($user, $empId) {

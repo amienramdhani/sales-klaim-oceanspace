@@ -35,8 +35,14 @@ class User extends Authenticatable implements FilamentUser
         'homebase',
         'region',
         'managed_regions',
+        'managed_branches',
+        'company',
+        'badan_usaha',
         'telegram_chat_id',
         'telegram_username',
+        'must_change_pin',
+        'initial_pin',
+        'pin_changed_at',
     ];
 
     /**
@@ -60,12 +66,39 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'managed_regions' => 'array',
+            'managed_branches' => 'array',
+            'must_change_pin' => 'boolean',
+            'pin_changed_at' => 'datetime',
         ];
     }
 
     protected static function booted(): void
     {
         static::saving(function (User $user) {
+            // Auto link employee_id if custom_id matches employee
+            if (empty($user->employee_id) && !empty($user->custom_id)) {
+                $matchedEmp = Employee::where('custom_id', trim($user->custom_id))->first();
+                if ($matchedEmp) {
+                    $user->employee_id = $matchedEmp->id;
+                }
+            }
+
+            // Auto sync custom_id from employee if empty
+            if (empty($user->custom_id) && $user->employee_id) {
+                $emp = Employee::find($user->employee_id);
+                if ($emp && !empty($emp->custom_id)) {
+                    $user->custom_id = $emp->custom_id;
+                }
+            }
+
+            // Auto generate initial PIN if empty on new user
+            if (empty($user->password)) {
+                $pin = str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+                $user->initial_pin = $pin;
+                $user->password = \Illuminate\Support\Facades\Hash::make($pin);
+                $user->must_change_pin = true;
+            }
+
             // If managed_regions is populated (array of strings), ensure region string is also kept in sync
             if (!empty($user->managed_regions) && is_array($user->managed_regions)) {
                 $cleaned = array_values(array_filter(array_map('trim', array_map('strtoupper', $user->managed_regions))));
@@ -76,6 +109,27 @@ class User extends Authenticatable implements FilamentUser
                     $user->managed_regions = array_values(array_filter(array_map('trim', array_map('strtoupper', explode(',', $user->region)))));
                 } else {
                     $user->managed_regions = [strtoupper(trim($user->region))];
+                }
+            }
+        });
+
+        static::saved(function (User $user) {
+            if ($user->employee_id) {
+                $emp = Employee::find($user->employee_id);
+                if ($emp) {
+                    $empUpdates = [];
+                    if ($user->name && $emp->name !== $user->name) {
+                        $empUpdates['name'] = $user->name;
+                    }
+                    if ($user->custom_id && $emp->custom_id !== $user->custom_id) {
+                        $empUpdates['custom_id'] = $user->custom_id;
+                    }
+                    if ($user->role_id && $emp->role_id !== $user->role_id) {
+                        $empUpdates['role_id'] = $user->role_id;
+                    }
+                    if (!empty($empUpdates)) {
+                        $emp->updateQuietly($empUpdates);
+                    }
                 }
             }
         });
@@ -132,14 +186,84 @@ class User extends Authenticatable implements FilamentUser
         return $this->role_code === 'JEJEN' || str_contains(strtoupper($this->name), 'JEJEN');
     }
 
+    public function isYoga(): bool
+    {
+        return in_array($this->role_code, ['YOGA', 'MGR_FINANCE', 'MANAGER_FINANCE']) || 
+               str_contains(strtoupper($this->name), 'YOGA') ||
+               str_contains(strtoupper($this->role_name), 'PAK YOGA') ||
+               str_contains(strtoupper($this->role_name), 'MANAGER FINANCE');
+    }
+
+    public function isNurbaiti(): bool
+    {
+        return in_array($this->role_code, ['NURBAITI', 'NURBAETI', 'FIN_COORD', 'KOORDINATOR_FINANCE']) || 
+               str_contains(strtoupper($this->name), 'NURBAITI') ||
+               str_contains(strtoupper($this->name), 'NURBAETI') ||
+               str_contains(strtoupper($this->name), 'RIASEHA') ||
+               str_contains(strtoupper($this->role_name), 'NURBAITI') ||
+               str_contains(strtoupper($this->role_name), 'NURBAETI') ||
+               str_contains(strtoupper($this->role_name), 'FINANCE COORDINATOR') ||
+               str_contains(strtoupper($this->role_name), 'KOORDINATOR FINANCE');
+    }
+
+    public function isThia(): bool
+    {
+        return in_array($this->role_code, ['THIA', 'MGR_KEUANGAN_CS', 'MANAJER_KEUANGAN']) || 
+               str_contains(strtoupper($this->name), 'THIA') ||
+               str_contains(strtoupper($this->role_name), 'THIA') ||
+               str_contains(strtoupper($this->role_name), 'MANAJER KEUANGAN');
+    }
+
+    public function isExecutiveApprover(): bool
+    {
+        return $this->isJejen() || $this->isYoga() || $this->isNurbaiti() || $this->isThia();
+    }
+
     public function isFinance(): bool
     {
-        return $this->role_code === 'FINANCE' || str_contains(strtoupper($this->name), 'FINANCE');
+        if ($this->isExecutiveApprover()) {
+            return false;
+        }
+
+        return in_array($this->role_code, ['FINANCE', 'FINANCE_MSI', 'FINANCE_CVCS', 'FINANCE_TOP']) || 
+               str_contains(strtoupper($this->name), 'FINANCE') ||
+               str_contains(strtoupper($this->role_name), 'FINANCE');
+    }
+
+    public function isFinanceMsi(): bool
+    {
+        return $this->role_code === 'FINANCE_MSI' || 
+               ($this->isFinance() && ($this->badan_usaha === 'PT MEDIA SELULAR INDONESIA' || str_contains(strtoupper($this->badan_usaha ?? ''), 'MEDIA SELULAR') || str_contains(strtoupper($this->badan_usaha ?? ''), 'MSI') || str_contains(strtoupper($this->name), 'MSI')));
+    }
+
+    public function isFinanceTop(): bool
+    {
+        return in_array($this->role_code, ['FINANCE_TOP', 'FINANCE_CVCS']) || 
+               ($this->isFinance() && (str_contains(strtoupper($this->badan_usaha ?? ''), 'TOP') || str_contains(strtoupper($this->badan_usaha ?? ''), 'COMPLETE') || str_contains(strtoupper($this->name), 'TOP') || str_contains(strtoupper($this->name), 'COMPLETE') || str_contains(strtoupper($this->name), 'CS')));
+    }
+
+    public function isFinanceCvcs(): bool
+    {
+        return $this->isFinanceTop();
+    }
+
+    public function getManagedBranchesList(): array
+    {
+        if (is_array($this->managed_branches)) {
+            return $this->managed_branches;
+        }
+        if (!empty($this->managed_branches)) {
+            $decoded = json_decode($this->managed_branches, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        return [];
     }
 
     public function isSales(): bool
     {
-        if ($this->isAdmin() || $this->isSuperAdmin() || $this->isFinance() || $this->isJejen() || $this->isAsm() || $this->isRgm()) {
+        if ($this->isAdmin() || $this->isSuperAdmin() || $this->isFinance() || $this->isJejen() || $this->isYoga() || $this->isNurbaiti() || $this->isThia() || $this->isAsm() || $this->isRgm()) {
             return false;
         }
 
@@ -157,13 +281,13 @@ class User extends Authenticatable implements FilamentUser
             return true;
         }
 
-        // Field user fallback: if not admin, superadmin, finance, jejen, asm, or rgm, they are sales
+        // Field user fallback: if not management or admin, they are sales
         return true;
     }
 
     public function isFieldUser(): bool
     {
-        return $this->isRgm() || $this->isAsm() || $this->isSales() || (!$this->isAdmin() && !$this->isFinance() && !$this->isSuperAdmin());
+        return $this->isRgm() || $this->isAsm() || $this->isSales();
     }
 
     /**

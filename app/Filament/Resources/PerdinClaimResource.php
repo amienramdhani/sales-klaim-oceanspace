@@ -24,16 +24,18 @@ class PerdinClaimResource extends Resource
 
     protected static ?string $navigationGroup = 'PENGAJUAN KLAIM';
 
+    protected static ?string $navigationLabel = 'Klaim Perjalanan Dinas (Perdin)';
+
     protected static ?string $modelLabel = 'Klaim Perjalanan Dinas';
 
     protected static ?string $pluralModelLabel = 'Klaim Perjalanan Dinas (Perdin)';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 3;
 
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        if (!$user || $user->isFinance() || $user->isJejen()) return false;
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
         return $user->isSuperAdmin() || $user->isAdmin() || $user->isAsm() || $user->isRgm() || $user->isSales();
     }
 
@@ -41,23 +43,48 @@ class PerdinClaimResource extends Resource
     {
         $user = auth()->user();
         if (!$user) return false;
-        if ($user->isFinance()) return false;
+        if ($user->isFinance() || $user->isExecutiveApprover()) return false;
         return true;
     }
 
     public static function canEdit(Model $record): bool
     {
         $user = auth()->user();
-        if (!$user) return false;
-        if ($user->isFinance()) return false;
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
 
-        // Jika sudah di-approved atau dana dicairkan, TIDAK DAPAT DI-EDIT (dikunci / read-only)
-        if (in_array($record->approval_status, ['ACC_ASM', 'ACC_RGM', 'ACC_PAK_JEJEN', 'DISETUJUI']) || $record->disbursement_status === 'Sudah Dicairkan') {
+        // Super Admin & Admin selalu memiliki hak akses penuh untuk mengedit pengajuan (Item 3)
+        if ($user->isSuperAdmin() || $user->isAdmin()) {
+            return true;
+        }
+
+        // Pengaju biasa tidak bisa edit saat dalam proses approval atau sudah dicairkan
+        $inApprovalProcess = in_array($record->approval_status, [
+            'ACC_ASM', 'ACC_RGM', 'ACC_ADMIN', 'ACC_PAK_JEJEN',
+            'WAITING_YOGA', 'WAITING_NURBAITI', 'WAITING_THIA',
+            'DISETUJUI'
+        ]) || $record->disbursement_status === 'Sudah Dicairkan';
+
+        if ($inApprovalProcess) {
             return false;
         }
 
-        // Dapat diedit saat status DRAFT, DIAJUKAN, DITOLAK, atau SEDANG_DIREVISI
-        return true;
+        // Pengaju biasa dapat mengedit saat DRAFT, DIAJUKAN, DITOLAK
+        return in_array($record->approval_status, ['DRAFT', 'DIAJUKAN', 'DITOLAK']);
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        $user = auth()->user();
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
+        if ($user->isSuperAdmin() || $user->isAdmin()) return true;
+        return in_array($record->approval_status, ['DRAFT', 'DITOLAK']);
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        $user = auth()->user();
+        if (!$user || $user->isFinance() || $user->isExecutiveApprover()) return false;
+        return $user->isSuperAdmin() || $user->isAdmin();
     }
 
     /**
@@ -65,27 +92,7 @@ class PerdinClaimResource extends Resource
      */
     public static function isAsmSupervisorOf(?\App\Models\User $user, Claim $record): bool
     {
-        if (!$user) return false;
-        if ($user->isSuperAdmin() || $user->isAdmin()) return true;
-        if (!$user->isAsm()) return false;
-
-        $applicantEmp = $record->effective_employee;
-        if (!$applicantEmp) return false;
-
-        $asmEmpId = $user->getEffectiveEmployeeId();
-        if ($asmEmpId && $applicantEmp->supervisor_id == $asmEmpId) {
-            return true;
-        }
-
-        // Fallback: jika supervisor belum di-set, cek kecocokan region
-        if (!$applicantEmp->supervisor_id) {
-            $userRegions = $user->getRegionList();
-            if ($applicantEmp->region && in_array(strtoupper($applicantEmp->region), $userRegions)) {
-                return true;
-            }
-        }
-
-        return false;
+        return Claim::isAsmSupervisorOf($user, $record);
     }
 
     /**
@@ -134,12 +141,51 @@ class PerdinClaimResource extends Resource
             return $query->whereRaw('1 = 0');
         }
 
-        if ($user->isSuperAdmin()) {
+        if ($user->isSuperAdmin() || $user->isAdmin()) {
             return $query;
         }
 
+        if ($user->isYoga()) {
+            return $query->where(function ($q) {
+                $q->where('approval_status', 'WAITING_YOGA')
+                  ->orWhereNotNull('approved_by_yoga_at');
+            });
+        }
+
+        if ($user->isNurbaiti()) {
+            return $query->where(function ($q) {
+                $q->where('approval_status', 'WAITING_NURBAITI')
+                  ->orWhereNotNull('approved_by_nurbaiti_at');
+            });
+        }
+
+        if ($user->isThia()) {
+            return $query->where(function ($q) {
+                $q->where('approval_status', 'WAITING_THIA')
+                  ->orWhereNotNull('approved_by_thia_at');
+            });
+        }
+
+        if ($user->isJejen()) {
+            return $query->whereIn('approval_status', [
+                'ACC_RGM', 'ACC_ADMIN', 'DIAJUKAN', 'WAITING_YOGA', 'WAITING_NURBAITI', 'WAITING_THIA', 'DISETUJUI', 'DITOLAK'
+            ]);
+        }
+
         if ($user->isFinance()) {
-            return $query->where('approval_status', 'DIAJUKAN');
+            $query->where(function ($sq) {
+                $sq->whereIn('approval_status', ['DISETUJUI', 'DITOLAK_FINANCE'])
+                   ->orWhere('disbursement_status', 'Sudah Dicairkan');
+            });
+
+            if (!empty($user->badan_usaha)) {
+                $bu = $user->badan_usaha;
+                $query->where(function ($sub) use ($bu) {
+                    $sub->where('badan_usaha', $bu)->orWhere('company', $bu);
+                });
+            }
+
+            return $query;
         }
 
         if ($user->isAdmin()) {
@@ -153,24 +199,62 @@ class PerdinClaimResource extends Resource
         return $query->visibleToUser($user);
     }
 
+    public static function getEffectiveEmployeeRecord(Forms\Get $get): ?Employee
+    {
+        $empId = $get('employee_id') ?: auth()->user()?->getEffectiveEmployeeId();
+        if ($empId) {
+            return Employee::with(['role', 'positionModel'])->find($empId);
+        }
+        return null;
+    }
+
+    public static function isSalesUser(Forms\Get $get): bool
+    {
+        $emp = static::getEffectiveEmployeeRecord($get);
+        if ($emp) {
+            $role = strtoupper($emp->role?->code ?? $emp->role?->name ?? $emp->position ?? '');
+            return str_contains($role, 'SALES') || str_contains($role, 'SLS') || str_contains($role, 'DSF');
+        }
+        return auth()->user()?->isSales() ?? false;
+    }
+
+    public static function isAsmUser(Forms\Get $get): bool
+    {
+        $emp = static::getEffectiveEmployeeRecord($get);
+        if ($emp) {
+            $role = strtoupper($emp->role?->code ?? $emp->role?->name ?? $emp->position ?? '');
+            return str_contains($role, 'ASM');
+        }
+        return auth()->user()?->isAsm() ?? false;
+    }
+
+    public static function getPerdinMealRateByRole(Forms\Get $get): float
+    {
+        $emp = static::getEffectiveEmployeeRecord($get);
+        if ($emp) {
+            $role = strtoupper($emp->role?->code ?? $emp->role?->name ?? $emp->position ?? '');
+            if (str_contains($role, 'RGM')) return 100000.0;
+            if (str_contains($role, 'ASM')) return 75000.0;
+            if (str_contains($role, 'SUPERVISOR') || str_contains($role, 'SPV') || str_contains($role, 'ASC')) return 50000.0;
+            if (str_contains($role, 'SALES') || str_contains($role, 'SLS') || str_contains($role, 'DSF')) return 35000.0;
+        }
+
+        $user = auth()->user();
+        if ($user) {
+            if ($user->isRgm()) return 100000.0;
+            if ($user->isAsm()) return 75000.0;
+            if ($user->isSales()) return 35000.0;
+        }
+
+        return 35000.0;
+    }
+
     /**
      * Otomatisasi perhitungan dana perdin dari lama hari dan rincian biaya
      */
-    public static function recalculatePerdin(Forms\Get $get, Forms\Set $set, ?int $daysOverride = null, ?int $nightsOverride = null): void
+    public static function recalculatePerdin(Forms\Get $get, Forms\Set $set, ?int $daysOverride = null): void
     {
-        $empId = $get('employee_id') ?: auth()->user()?->getEffectiveEmployeeId();
-        $mealRate = 100000.0;
-        $lodgingRate = 250000.0;
-
-        if ($empId) {
-            $emp = Employee::with('role')->find($empId);
-            if ($emp) {
-                $mealRate = $emp->perdin_meal_allowance > 0 ? (float)$emp->perdin_meal_allowance : (float)($emp->role?->meal_allowance_per_day ?? 100000);
-                $lodgingRate = $emp->perdin_lodging_allowance > 0 ? (float)$emp->perdin_lodging_allowance : (float)($emp->role?->lodging_allowance_per_night ?? 250000);
-            }
-        }
-
-        // Tentukan lama hari (minimal 1 hari)
+        // 1. Tentukan lama hari (minimal 1 hari)
         if ($daysOverride !== null) {
             $days = max(1, $daysOverride);
         } else {
@@ -184,28 +268,66 @@ class PerdinClaimResource extends Resource
             }
         }
 
-        // Tentukan jumlah malam menginap (hari - 1, jika 1 hari PP = 0 malam)
-        if ($nightsOverride !== null) {
-            $nights = max(0, $nightsOverride);
+        $set('days_count', $days);
+        $set('nights_count', 0);
+
+        // 2. Uang makan di-lock berdasarkan role (Sales 35k, SPV 50k, ASM 75k, RGM 100k)
+        $mealRate = static::getPerdinMealRateByRole($get);
+        $meal = (float)($days * $mealRate);
+        $set('meal_allowance_qty', $days);
+        $set('meal_allowance_rate', $mealRate);
+        $set('meal_allowance', $meal);
+        $set('lodging_allowance', 0.0);
+
+        // 3. Transportasi BBM (Sales default Rp 50.000, tapi bisa dihapus/diubah ke 0 jika pakai travel; ASM form ditiadakan / 0)
+        $isSales = static::isSalesUser($get);
+        $isAsm = static::isAsmUser($get);
+
+        if ($isAsm) {
+            $fuel = 0.0;
+            $set('fuel_cost', 0.0);
         } else {
-            $nights = max(0, $days - 1);
+            $rawFuel = $get('fuel_cost');
+            if ($rawFuel === null || $rawFuel === '') {
+                $fuel = $isSales ? 50000.0 : 0.0;
+                $set('fuel_cost', $fuel);
+            } else {
+                $fuel = (float)$rawFuel;
+                if ($isSales && $fuel > 50000.0) {
+                    $fuel = 50000.0;
+                    $set('fuel_cost', $fuel);
+                }
+            }
         }
 
-        $set('days_count', $days);
-        $set('nights_count', $nights);
+        // 4. Transportasi Travel
+        $travel = (float)($get('travel_cost') ?? 0);
 
-        $meal = (float)($days * $mealRate);
-        $lodging = (float)($nights * $lodgingRate);
-
-        $set('meal_allowance', $meal);
-        $set('lodging_allowance', $lodging);
-
-        $toll = (float)($get('toll_cost') ?? 0);
-        $fuel = (float)($get('fuel_cost') ?? 0);
+        // 5. Biaya Sewa Motor
         $rental = (float)($get('car_rental_cost') ?? 0);
 
-        $total = $meal + $lodging + $toll + $fuel + $rental;
+        // 6. Transportasi (Lainnya)
+        $other = (float)($get('other_transport_cost') ?? ($get('toll_cost') ?? 0));
+        $set('toll_cost', $other);
+
+        $total = $meal + $fuel + $travel + $rental + $other;
         $set('amount', $total);
+    }
+
+    public static function recalculateNotaBalik(Forms\Get $get, Forms\Set $set, Claim $record): void
+    {
+        $actualMeal = (float)($get('actual_meal_allowance') ?? $record->actual_meal_allowance ?? $record->meal_allowance);
+        $actualFuel = (float)($get('actual_fuel_cost') ?? $record->actual_fuel_cost ?? $record->fuel_cost);
+        $actualTravel = (float)($get('actual_travel_cost') ?? $record->actual_travel_cost ?? $record->travel_cost);
+        $actualRental = (float)($get('actual_car_rental_cost') ?? $record->actual_car_rental_cost ?? $record->car_rental_cost);
+        $actualOther = (float)($get('actual_other_transport_cost') ?? $record->actual_other_transport_cost ?? $record->actual_toll_cost ?? $record->other_transport_cost ?? $record->toll_cost);
+
+        $actualTotal = $actualMeal + $actualFuel + $actualTravel + $actualRental + $actualOther;
+        $remaining = max(0, ((float)$record->amount) - $actualTotal);
+
+        $set('actual_amount_total', $actualTotal);
+        $set('remaining_amount_calculated', $remaining);
+        $set('return_transfer_amount', $remaining);
     }
 
     public static function form(Form $form): Form
@@ -216,6 +338,9 @@ class PerdinClaimResource extends Resource
                 Forms\Components\Hidden::make('user_id')->default(fn () => auth()->id()),
                 Forms\Components\Hidden::make('claim_category')->default('perdin'),
                 Forms\Components\Hidden::make('is_perdin')->default(true),
+                Forms\Components\Hidden::make('nights_count')->default(0),
+                Forms\Components\Hidden::make('lodging_allowance')->default(0),
+                Forms\Components\Hidden::make('homebase')->default('Purwokerto'),
 
                 // TOP SECTION: _UID EXTERNAL & STATUS PENGAJUAN (Hanya untuk Admin / Finance / Super Admin)
                 Forms\Components\Section::make('_UID EXTERNAL & STATUS PENGAJUAN')
@@ -225,7 +350,7 @@ class PerdinClaimResource extends Resource
                     ->schema([
                         Forms\Components\TextInput::make('_uid')
                             ->label('_UID (ID Form External)')
-                            ->placeholder('Contoh: UID-PERDIN-2026-001')
+                            ->placeholder('Contoh: MSI-12345 atau UID-12345')
                             ->helperText('Setelah _UID terisi, pengajuan otomatis masuk ke antrean Finance.')
                             ->columnSpan(1),
 
@@ -236,7 +361,11 @@ class PerdinClaimResource extends Resource
                                 'DIAJUKAN' => 'DIAJUKAN',
                                 'ACC_ASM' => 'ACC_ASM',
                                 'ACC_RGM' => 'ACC_RGM',
+                                'ACC_ADMIN' => 'ACC_ADMIN',
                                 'ACC_PAK_JEJEN' => 'ACC_PAK_JEJEN',
+                                'WAITING_YOGA' => 'Menunggu ACC Pak Yoga (Manager Finance)',
+                                'WAITING_NURBAITI' => 'Menunggu ACC Bu Nurbaiti (Finance Coordinator)',
+                                'WAITING_THIA' => 'Menunggu ACC Bu Thia Aisyah (Manajer Keuangan)',
                                 'DISETUJUI' => 'DISETUJUI',
                                 'DITOLAK' => 'DITOLAK',
                             ])
@@ -254,12 +383,23 @@ class PerdinClaimResource extends Resource
                             ->required()
                             ->columnSpan(1),
                     ])->columns(3)
-                    ->extraAttributes(['style' => 'background: #6dbbefff; border-radius: 12px; padding: 1.2rem;']),
+                    ->extraAttributes(['class' => 'bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-xl p-4']),
 
                 Forms\Components\Section::make('Informasi Pemohon & Tujuan Perjalanan Dinas')
-                    ->description('Pilih karyawan pemohon dan rute cabang tujuan dinas')
+                    ->description('Pilih badan usaha, karyawan pemohon, dan kota tujuan dinas')
                     ->icon('heroicon-o-user')
                     ->schema([
+                        Forms\Components\Select::make('badan_usaha')
+                            ->label('Badan Usaha')
+                            ->options([
+                                'PT MEDIA SELULAR INDONESIA' => 'PT MEDIA SELULAR INDONESIA',
+                                'CV TOP SELULAR' => 'CV TOP SELULAR',
+                            ])
+                            ->default(fn () => auth()->user()?->badan_usaha ?? 'PT MEDIA SELULAR INDONESIA')
+                            ->required()
+                            ->reactive()
+                            ->afterStateUpdated(fn (Forms\Set $set, $state) => $set('company', $state)),
+
                         Forms\Components\Select::make('employee_id')
                             ->label('Pemohon / Karyawan (Sales / ASM / RGM)')
                             ->relationship('employee', 'name')
@@ -270,44 +410,61 @@ class PerdinClaimResource extends Resource
                             ->searchable()
                             ->preload()
                             ->reactive()
-                            ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
-                                if ($state) {
-                                    $emp = Employee::with(['role', 'positionModel'])->find($state);
-                                    if ($emp) {
-                                        $set('homebase', $emp->homebase ?? 'Purwokerto');
-                                        $transportRate = $emp->perdin_transport_budget > 0 ? $emp->perdin_transport_budget : ($emp->role?->toll_allowance ?? 500000);
-                                        if (empty($get('toll_cost')) || (float)$get('toll_cost') == 0) {
-                                            $set('toll_cost', (float)$transportRate);
-                                        }
-                                    }
-                                }
+                            ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set) {
                                 self::recalculatePerdin($get, $set);
                             })
                             ->required(),
 
-                        Forms\Components\Select::make('branch_id')
-                            ->label('Cabang Tujuan')
-                            ->relationship('branch', 'name')
-                            ->searchable()
-                            ->preload()
-                            ->reactive()
-                            ->afterStateUpdated(function (Forms\Set $set, $state) {
-                                if ($state) {
-                                    $branch = Branch::find($state);
-                                    if ($branch) {
-                                        $set('destination_city', $branch->city);
-                                    }
-                                }
-                            }),
-
-                        Forms\Components\TextInput::make('homebase')
-                            ->label('Kota Asal (Homebase)')
-                            ->default('Purwokerto')
-                            ->required(),
+                        Forms\Components\TextInput::make('destination_city')
+                            ->label('Kota Tujuan')
+                            ->required()
+                            ->placeholder('Contoh: Semarang / Solo / Cirebon')
+                            ->helperText('Tuliskan kota tujuan dinas'),
                     ])->columns(3),
 
-                Forms\Components\Section::make('Jadwal Perjalanan Dinas & Batas Nota Balik')
-                    ->description('Tentukan tanggal keberangkatan dan tanggal kepulangan. Total hari otomatis menghitung tunjangan uang makan & penginapan.')
+                Forms\Components\Section::make('Informasi Rekening Bank Pencairan')
+                    ->description('Pencairan dana akan ditransfer ke rekening di bawah ini. Anda dapat memasukkan rekening lain jika diperlukan.')
+                    ->icon('heroicon-o-credit-card')
+                    ->schema([
+                        Forms\Components\Placeholder::make('default_bank_info')
+                            ->label('Rekening Default Karyawan')
+                            ->content(function (Forms\Get $get) {
+                                $emp = static::getEffectiveEmployeeRecord($get);
+                                if (!$emp || (empty($emp->bank_name) && empty($emp->bank_account_number))) {
+                                    return 'Belum ada rekening default terdaftar di profil karyawan.';
+                                }
+                                return "Bank {$emp->bank_name} - {$emp->bank_account_number} a/n {$emp->bank_account_name}";
+                            })
+                            ->columnSpanFull(),
+
+                        Forms\Components\Toggle::make('use_custom_bank')
+                            ->label('Gunakan Rekening Lain untuk Pengajuan Ini?')
+                            ->default(fn (?Claim $record) => !empty($record?->custom_bank_name) || !empty($record?->custom_bank_account_number))
+                            ->reactive()
+                            ->columnSpanFull(),
+
+                        Forms\Components\TextInput::make('custom_bank_name')
+                            ->label('Nama Bank Alternatif')
+                            ->placeholder('Contoh: BCA / MANDIRI / BRI / BNI')
+                            ->datalist(['BCA', 'MANDIRI', 'BRI', 'BNI', 'BSI', 'CIMB NIAGA', 'PERMATA', 'DANAMON', 'JAGO', 'SEABANK'])
+                            ->visible(fn (Forms\Get $get) => (bool)$get('use_custom_bank'))
+                            ->required(fn (Forms\Get $get) => (bool)$get('use_custom_bank')),
+
+                        Forms\Components\TextInput::make('custom_bank_account_number')
+                            ->label('Nomor Rekening Alternatif')
+                            ->placeholder('Contoh: 1234567890')
+                            ->visible(fn (Forms\Get $get) => (bool)$get('use_custom_bank'))
+                            ->required(fn (Forms\Get $get) => (bool)$get('use_custom_bank')),
+
+                        Forms\Components\TextInput::make('custom_bank_account_name')
+                            ->label('Nama Pemilik Rekening Alternatif')
+                            ->placeholder('Contoh: NAMA DI BUKU TABUNGAN')
+                            ->visible(fn (Forms\Get $get) => (bool)$get('use_custom_bank'))
+                            ->required(fn (Forms\Get $get) => (bool)$get('use_custom_bank')),
+                    ])->columns(3),
+
+                Forms\Components\Section::make('Jadwal Perjalanan Dinas & Agenda')
+                    ->description('Tentukan tanggal keberangkatan dan kepulangan. Jumlah hari otomatis mengalikan uang makan harian.')
                     ->icon('heroicon-o-calendar')
                     ->schema([
                         Forms\Components\DatePicker::make('claim_date')
@@ -339,26 +496,6 @@ class PerdinClaimResource extends Resource
                             ->required()
                             ->helperText('Batas akhir Nota Balik: Maksimal H+1 setelah tanggal pulang.'),
 
-                        Forms\Components\TextInput::make('destination_city')
-                            ->label('Kota Tujuan Perdin')
-                            ->required()
-                            ->placeholder('Contoh: Majenang / Cirebon / Semarang'),
-
-                        Forms\Components\TextInput::make('distance_km')
-                            ->label('Jarak Perjalanan (KM)')
-                            ->numeric()
-                            ->suffix('KM')
-                            ->default(85)
-                            ->required()
-                            ->helperText('Ketentuan: Minimal jarak 80 km dari homebase')
-                            ->rule(function () {
-                                return function (string $attribute, $value, \Closure $fail) {
-                                    if ($value < 80) {
-                                        $fail('Minimal jarak perjalanan dinas adalah 80 km dari homebase.');
-                                    }
-                                };
-                            }),
-
                         Forms\Components\TextInput::make('days_count')
                             ->label('Jumlah Hari Dinas')
                             ->numeric()
@@ -374,155 +511,152 @@ class PerdinClaimResource extends Resource
                                 self::recalculatePerdin($get, $set, $days);
                             })
                             ->dehydrateStateUsing(fn ($state) => max(1, (int)($state ?? 1)))
-                            ->helperText('Otomatis menghitung Uang Makan & Penginapan')
+                            ->helperText('Otomatis menghitung Uang Makan')
                             ->required(),
 
-                        Forms\Components\TextInput::make('nights_count')
-                            ->label('Jumlah Malam Menginap')
+                        Forms\Components\TextInput::make('distance_km')
+                            ->label('Jarak Perjalanan (KM)')
                             ->numeric()
-                            ->default(0)
-                            ->minValue(0)
-                            ->live(onBlur: true)
-                            ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
-                                self::recalculatePerdin($get, $set, (int)($get('days_count') ?? 1), (int)$state);
-                            })
-                            ->dehydrateStateUsing(fn ($state) => max(0, (int)($state ?? 0)))
-                            ->helperText('0 jika Pulang-Pergi (PP)')
-                            ->required(),
+                            ->suffix('KM')
+                            ->default(85)
+                            ->required()
+                            ->helperText('Ketentuan: Minimal jarak 80 km')
+                            ->rule(function () {
+                                return function (string $attribute, $value, \Closure $fail) {
+                                    if ($value < 80) {
+                                        $fail('Minimal jarak perjalanan dinas adalah 80 km.');
+                                    }
+                                };
+                            }),
 
                         Forms\Components\TextInput::make('purpose')
                             ->label('Keperluan / Agenda Perjalanan Dinas')
                             ->default('VISIT DEALER & OPERASIONAL CABANG')
                             ->columnSpanFull()
                             ->required(),
-                    ])->columns(3),
+                    ])->columns(4),
 
                 Forms\Components\Section::make('Rincian Estimasi Biaya Perjalanan Dinas')
-                    ->description('Tunjangan uang makan dan penginapan otomatis dihitung dari lama hari/malam. Total estimasi otomatis diakumulasi.')
+                    ->description('Uang makan terkunci otomatis berdasarkan role (Sales 35k, SPV 50k, ASM 75k, RGM 100k/hari). Transportasi terdiri dari BBM, Travel, Sewa Motor, dan Lainnya.')
                     ->icon('heroicon-o-banknotes')
                     ->schema([
                         Forms\Components\Grid::make(3)
                             ->schema([
-                                Forms\Components\TextInput::make('meal_allowance')
-                                    ->label('1. Tunjangan Uang Makan (Rp)')
-                                    ->numeric()
-                                    ->prefix('Rp')
-                                    ->default(function (Forms\Get $get) {
-                                        $empId = $get('employee_id') ?: auth()->user()?->getEffectiveEmployeeId();
-                                        if ($empId) {
-                                            $emp = Employee::with('role')->find($empId);
-                                            if ($emp) {
-                                                return (float)($emp->perdin_meal_allowance > 0 ? $emp->perdin_meal_allowance : ($emp->role?->meal_allowance_per_day ?? 100000));
-                                            }
-                                        }
-                                        return 100000.0;
-                                    })
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set) {
-                                        $meal = (float)($get('meal_allowance') ?? 0);
-                                        $lodging = (float)($get('lodging_allowance') ?? 0);
-                                        $toll = (float)($get('toll_cost') ?? 0);
-                                        $fuel = (float)($get('fuel_cost') ?? 0);
-                                        $rental = (float)($get('car_rental_cost') ?? 0);
-                                        $set('amount', $meal + $lodging + $toll + $fuel + $rental);
-                                    })
-                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0))
-                                    ->helperText('Otomatis: Lama Hari x Tarif Makan Karyawan'),
+                                Forms\Components\Fieldset::make('1. Tunjangan Uang Makan')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('meal_allowance_qty')
+                                            ->label('Qty (Hari)')
+                                            ->numeric()
+                                            ->default(fn (Forms\Get $get) => max(1, (int)($get('days_count') ?? 1)))
+                                            ->live(onBlur: true)
+                                            ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
+                                                $days = max(1, (int)($state ?? 1));
+                                                $set('days_count', $days);
+                                                self::recalculatePerdin($get, $set, $days);
+                                            })
+                                            ->helperText('Jumlah hari perdin'),
 
-                                Forms\Components\TextInput::make('lodging_allowance')
-                                    ->label('2. Tunjangan Penginapan Hotel (Rp)')
-                                    ->numeric()
-                                    ->prefix('Rp')
-                                    ->default(0)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set) {
-                                        $meal = (float)($get('meal_allowance') ?? 0);
-                                        $lodging = (float)($get('lodging_allowance') ?? 0);
-                                        $toll = (float)($get('toll_cost') ?? 0);
-                                        $fuel = (float)($get('fuel_cost') ?? 0);
-                                        $rental = (float)($get('car_rental_cost') ?? 0);
-                                        $set('amount', $meal + $lodging + $toll + $fuel + $rental);
-                                    })
-                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0))
-                                    ->helperText('Otomatis: Malam x Tarif Hotel (Rp 0 jika PP)'),
+                                        Forms\Components\TextInput::make('meal_allowance_rate')
+                                            ->label('Jumlah / Tarif (Rp)')
+                                            ->numeric()
+                                            ->prefix('Rp')
+                                            ->disabled()
+                                            ->dehydrated(false)
+                                            ->default(fn (Forms\Get $get) => static::getPerdinMealRateByRole($get))
+                                            ->helperText(function (Forms\Get $get) {
+                                                $rate = static::getPerdinMealRateByRole($get);
+                                                return 'Terkunci: Rp ' . number_format($rate, 0, ',', '.') . ' / hari';
+                                            }),
 
-                                Forms\Components\TextInput::make('toll_cost')
-                                    ->label('3. Transportasi - Tiket / Tol (Rp)')
-                                    ->numeric()
-                                    ->prefix('Rp')
-                                    ->default(0)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set) {
-                                        $meal = (float)($get('meal_allowance') ?? 0);
-                                        $lodging = (float)($get('lodging_allowance') ?? 0);
-                                        $toll = (float)($get('toll_cost') ?? 0);
-                                        $fuel = (float)($get('fuel_cost') ?? 0);
-                                        $rental = (float)($get('car_rental_cost') ?? 0);
-                                        $set('amount', $meal + $lodging + $toll + $fuel + $rental);
-                                    })
-                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0)),
+                                        Forms\Components\TextInput::make('meal_allowance')
+                                            ->label('Total Nominal (Qty x Jumlah)')
+                                            ->numeric()
+                                            ->prefix('Rp')
+                                            ->disabled()
+                                            ->dehydrated()
+                                            ->default(function (Forms\Get $get) {
+                                                $rate = static::getPerdinMealRateByRole($get);
+                                                $days = max(1, (int)($get('days_count') ?? 1));
+                                                return (float)($days * $rate);
+                                            })
+                                            ->helperText('Otomatis: Qty x Tarif'),
+                                    ])
+                                    ->columns(3)
+                                    ->columnSpanFull(),
 
                                 Forms\Components\TextInput::make('fuel_cost')
-                                    ->label('4. Transportasi - Bensin / BBM (Rp)')
+                                    ->label(fn (Forms\Get $get) => static::isSalesUser($get) ? '2. Transportasi (BBM) - Jatah Sales' : '2. Transportasi (BBM)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(fn (Forms\Get $get) => static::isSalesUser($get) ? 50000.0 : 0.0)
+                                    ->dehydrated()
+                                    ->visible(fn (Forms\Get $get) => !static::isAsmUser($get))
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
+                                        $isSales = static::isSalesUser($get);
+                                        if ($isSales && (float)$state > 50000.0) {
+                                            $set('fuel_cost', 50000.0);
+                                        }
+                                        self::recalculatePerdin($get, $set);
+                                    })
+                                    ->helperText(fn (Forms\Get $get) => static::isSalesUser($get) ? 'Jatah BBM Sales Rp 50.000 (Dapat dihapus / diubah ke 0 jika menggunakan travel)' : 'Biaya bensin / BBM kendaraan'),
+
+                                Forms\Components\TextInput::make('travel_cost')
+                                    ->label('3. Transportasi (Travel)')
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set) {
-                                        $meal = (float)($get('meal_allowance') ?? 0);
-                                        $lodging = (float)($get('lodging_allowance') ?? 0);
-                                        $toll = (float)($get('toll_cost') ?? 0);
-                                        $fuel = (float)($get('fuel_cost') ?? 0);
-                                        $rental = (float)($get('car_rental_cost') ?? 0);
-                                        $set('amount', $meal + $lodging + $toll + $fuel + $rental);
-                                    })
-                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0)),
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set) => self::recalculatePerdin($get, $set))
+                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0))
+                                    ->helperText('Biaya tiket / armada travel antar kota'),
 
                                 Forms\Components\TextInput::make('car_rental_cost')
-                                    ->label('5. Kompensasi Sewa Kendaraan (Rp)')
+                                    ->label('4. Biaya Sewa Motor')
                                     ->numeric()
                                     ->prefix('Rp')
                                     ->default(0)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set) {
-                                        $meal = (float)($get('meal_allowance') ?? 0);
-                                        $lodging = (float)($get('lodging_allowance') ?? 0);
-                                        $toll = (float)($get('toll_cost') ?? 0);
-                                        $fuel = (float)($get('fuel_cost') ?? 0);
-                                        $rental = (float)($get('car_rental_cost') ?? 0);
-                                        $set('amount', $meal + $lodging + $toll + $fuel + $rental);
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set) => self::recalculatePerdin($get, $set))
+                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0))
+                                    ->helperText('Biaya sewa sepeda motor operasional'),
+
+                                Forms\Components\TextInput::make('other_transport_cost')
+                                    ->label('5. Transportasi (Lainnya)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(0)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, $state) {
+                                        $set('toll_cost', (float)($state ?? 0));
+                                        self::recalculatePerdin($get, $set);
                                     })
-                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0)),
+                                    ->dehydrateStateUsing(fn ($state) => (float)($state ?? 0))
+                                    ->helperText('Biaya tol / karcis parkir / penyeberangan / lainnya'),
 
                                 Forms\Components\TextInput::make('amount')
                                     ->label('Total Estimasi Dana Perdin (Rp)')
                                     ->numeric()
                                     ->prefix('Rp')
-                                    ->required()
-                                    ->live()
+                                    ->disabled()
+                                    ->dehydrated()
                                     ->default(function (Forms\Get $get) {
-                                        $empId = $get('employee_id') ?: auth()->user()?->getEffectiveEmployeeId();
-                                        $meal = 100000.0;
-                                        if ($empId) {
-                                            $emp = Employee::with('role')->find($empId);
-                                            if ($emp) {
-                                                $meal = (float)($emp->perdin_meal_allowance > 0 ? $emp->perdin_meal_allowance : ($emp->role?->meal_allowance_per_day ?? 100000));
-                                            }
-                                        }
-                                        return $meal;
+                                        $meal = static::getPerdinMealRateByRole($get) * max(1, (int)($get('days_count') ?? 1));
+                                        $fuel = static::isSalesUser($get) ? 50000.0 : 0.0;
+                                        return $meal + $fuel;
                                     })
-                                    ->helperText('Otomatis dihitung dari Lama Hari: (Uang Makan x Hari) + (Penginapan x Malam) + Tiket/Tol + BBM + Sewa Kendaraan')
-                                    ->dehydrateStateUsing(fn ($state, Forms\Get $get) => (float)($state ?: ((float)($get('meal_allowance') ?? 0) + (float)($get('lodging_allowance') ?? 0) + (float)($get('toll_cost') ?? 0) + (float)($get('fuel_cost') ?? 0) + (float)($get('car_rental_cost') ?? 0)))),
+                                    ->helperText('Otomatis dihitung dari Uang Makan + Transportasi'),
                             ]),
                     ]),
 
-                Forms\Components\Section::make('Lampiran Bukti Tiket / Hotel / Nota Perdin')
-                    ->description('Lampirkan foto tiket transportasi, kwitansi hotel, atau nota pendukung perdin.')
+                Forms\Components\Section::make('Lampiran Bukti Tiket / Pendukung Operasional')
+                    ->description('Lampirkan foto tiket transportasi atau dokumen pendukung perdin jika ada (struk makan tidak diperlukan, kwitansi uang makan dibuat otomatis sistem).')
                     ->icon('heroicon-o-paper-clip')
+                    ->visible(fn () => auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin())
                     ->collapsed()
                     ->schema([
                         Forms\Components\FileUpload::make('photos')
-                            ->label('Foto Tiket / Kwitansi Hotel / Struk Nota')
+                            ->label('Foto Tiket / Dokumen Pendukung (Opsional)')
                             ->image()
                             ->imageResizeMode('contain')
                             ->imageResizeTargetWidth('1920')
@@ -543,6 +677,24 @@ class PerdinClaimResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('_uid')
+                    ->label('_UID')
+                    ->badge()
+                    ->color('info')
+                    ->weight('bold')
+                    ->placeholder('-')
+                    ->searchable()
+                    ->sortable()
+                    ->copyable(),
+
+                Tables\Columns\TextColumn::make('kwitansi_number')
+                    ->label('No. Kwitansi')
+                    ->badge()
+                    ->color('info')
+                    ->placeholder('-')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 Tables\Columns\TextColumn::make('claim_date')
                     ->label('Tgl Berangkat')
                     ->date('d/m/Y')
@@ -553,13 +705,6 @@ class PerdinClaimResource extends Resource
                     ->date('d/m/Y')
                     ->placeholder('-')
                     ->sortable(),
-
-                Tables\Columns\TextColumn::make('kwitansi_number')
-                    ->label('No. Kwitansi')
-                    ->badge()
-                    ->color('info')
-                    ->placeholder('-')
-                    ->searchable(),
 
                 Tables\Columns\TextColumn::make('employee.name')
                     ->label('Pemohon')
@@ -588,21 +733,21 @@ class PerdinClaimResource extends Resource
                     ->summarize(Tables\Columns\Summarizers\Sum::make()->money('IDR')->label('Total')),
 
                 Tables\Columns\TextColumn::make('approval_status')
-                    ->label('Status Approval')
+                    ->label('Status Approval & Tracking')
                     ->badge()
+                    ->formatStateUsing(fn (string $state, Claim $record): string => $record->approval_stage_label)
                     ->color(fn (string $state): string => match ($state) {
                         'DRAFT' => 'gray',
                         'DIAJUKAN' => 'warning',
                         'ACC_ASM' => 'info',
-                        'ACC_RGM' => 'primary',
-                        'ACC_PAK_JEJEN' => 'indigo',
+                        'ACC_RGM', 'ACC_ADMIN' => 'primary',
+                        'ACC_PAK_JEJEN', 'WAITING_YOGA', 'WAITING_NURBAITI', 'WAITING_THIA' => 'indigo',
                         'DISETUJUI' => 'success',
                         'SEDANG_DIREVISI' => 'warning',
-                        'DITOLAK_FINANCE' => 'danger',
-                        'DITOLAK' => 'danger',
+                        'DITOLAK_FINANCE', 'DITOLAK' => 'danger',
                         default => 'gray',
                     })
-                    ->description(fn (Claim $record) => !empty($record->rejection_reason) ? "Catatan: {$record->rejection_reason}" : null),
+                    ->description(fn (Claim $record) => $record->approval_journey_summary),
 
                 Tables\Columns\TextColumn::make('admin_gform_submitted')
                     ->label('Google Form Atasan')
@@ -705,14 +850,25 @@ class PerdinClaimResource extends Resource
                         return $query;
                     }),
 
+                Tables\Filters\SelectFilter::make('badan_usaha')
+                    ->label('Badan Usaha')
+                    ->options([
+                        'PT MEDIA SELULAR INDONESIA' => 'PT MEDIA SELULAR INDONESIA',
+                        'CV COMPLETE SELULAR' => 'CV COMPLETE SELULAR',
+                    ]),
+
                 Tables\Filters\SelectFilter::make('approval_status')
                     ->label('Status Approval')
                     ->options([
                         'DIAJUKAN' => 'DIAJUKAN (Menunggu Approval)',
                         'ACC_ASM' => 'ACC_ASM (Disetujui ASM)',
                         'ACC_RGM' => 'ACC_RGM (Disetujui RGM)',
+                        'ACC_ADMIN' => 'ACC_ADMIN (Disetujui Admin)',
                         'ACC_PAK_JEJEN' => 'ACC_PAK_JEJEN (Disetujui Pak Jejen)',
-                        'DISETUJUI' => 'DISETUJUI (Selesai)',
+                        'WAITING_YOGA' => 'Menunggu ACC Pak Yoga (Manager Finance)',
+                        'WAITING_NURBAITI' => 'Menunggu ACC Bu Nurbaiti (Finance Coordinator)',
+                        'WAITING_THIA' => 'Menunggu ACC Bu Thia Aisyah (Manajer Keuangan)',
+                        'DISETUJUI' => 'DISETUJUI (Siap Dicairkan Finance)',
                         'DITOLAK' => 'DITOLAK',
                     ]),
 
@@ -739,6 +895,7 @@ class PerdinClaimResource extends Resource
                     }),
             ])
             ->actions([
+                Tables\Actions\ActionGroup::make([
                 // 1. Approval Action: ACC ASM (Izinkan / Tolak oleh ASM Atasan)
                 Tables\Actions\Action::make('acc_asm')
                     ->label('Izinkan (ACC ASM)')
@@ -752,12 +909,20 @@ class PerdinClaimResource extends Resource
                     ->requiresConfirmation()
                     ->modalHeading('Konfirmasi Izin Perjalanan Dinas (ASM)')
                     ->modalDescription('Apakah Anda mengizinkan pengajuan perjalanan dinas ini untuk diteruskan ke RGM?')
-                    ->action(function (Claim $record) {
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan catatan atau instruksi jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
                         $user = auth()->user();
                         $record->update([
                             'approval_status' => 'ACC_ASM',
                             'approved_by_asm_id' => $user?->id,
                             'approved_by_asm_at' => now(),
+                            'asm_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
                         ]);
                         Notification::make()->title('Pengajuan Perdin diizinkan oleh ASM! Menunggu persetujuan RGM.')->info()->send();
                     }),
@@ -801,14 +966,22 @@ class PerdinClaimResource extends Resource
                     ->requiresConfirmation()
                     ->modalHeading('Konfirmasi Izin Perjalanan Dinas (RGM)')
                     ->modalDescription('Apakah Anda menyetujui pengajuan perjalanan dinas ini?')
-                    ->action(function (Claim $record) {
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan catatan atau instruksi jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
                         $user = auth()->user();
                         $record->update([
                             'approval_status' => 'ACC_RGM',
                             'approved_by_rgm_id' => $user?->id,
                             'approved_by_rgm_at' => now(),
+                            'rgm_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
                         ]);
-                        Notification::make()->title('Pengajuan Perdin diizinkan oleh RGM! Siap diajukan ke Management.')->success()->send();
+                        Notification::make()->title('Pengajuan Perdin di-ACC RGM! Diteruskan ke Admin untuk verifikasi.')->success()->send();
                     }),
 
                 Tables\Actions\Action::make('reject_rgm')
@@ -862,27 +1035,64 @@ class PerdinClaimResource extends Resource
                         Notification::make()->title('Pengajuan Perdin berhasil diajukan kembali ke atasan!')->success()->send();
                     }),
 
-                // 3. Approval Action: ACC Pak Jejen (Head of Sales)
-                Tables\Actions\Action::make('acc_jejen')
-                    ->label('Acc Pak Jejen')
-                    ->icon('heroicon-o-star')
+                // 3. Admin Verifikasi & Setujui -> Kirim ke Head of Sales (Pak Jejen)
+                Tables\Actions\Action::make('admin_verify_approve')
+                    ->label('Verifikasi & Kirim ke Pak Jejen')
+                    ->icon('heroicon-o-check-badge')
                     ->color('success')
                     ->visible(function (Claim $record) {
                         $user = auth()->user();
-                        if (!$user) return false;
-                        return in_array($record->approval_status, ['ACC_RGM', 'DIAJUKAN']) && ($user->isJejen() || $user->isAdmin() || $user->isSuperAdmin());
+                        if (!$user || (!$user->isAdmin() && !$user->isSuperAdmin())) return false;
+                        return in_array($record->approval_status, ['ACC_RGM', 'DITOLAK_FINANCE']) ||
+                               ($record->approval_status === 'DIAJUKAN' && ($record->effective_employee?->isRgm() || $record->user?->isRgm()));
                     })
-                    ->action(function (Claim $record) {
+                    ->requiresConfirmation()
+                    ->modalHeading('Verifikasi & Teruskan ke Head of Sales')
+                    ->modalDescription('Pastikan data form perdin dan persetujuan atasan telah sah. Pengajuan akan diteruskan ke Head of Sales (Pak Jejen) untuk persetujuan.')
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Verifikasi Admin (Opsional)')
+                            ->placeholder('Tambahkan catatan verifikasi jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
                         $user = auth()->user();
                         $record->update([
-                            'approval_status' => 'ACC_PAK_JEJEN',
-                            'approved_by_jejen_id' => $user?->id,
-                            'approved_by_jejen_at' => now(),
+                            'approval_status' => 'ACC_ADMIN',
+                            'admin_approved_by_id' => $user?->id,
+                            'admin_approved_at' => now(),
+                            'admin_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
                         ]);
-                        Notification::make()->title('Pengajuan Perdin di-ACC oleh Pak Jejen!')->success()->send();
+                        Notification::make()->title('Pengajuan Perdin diverifikasi Admin! Diteruskan ke Head of Sales (Pak Jejen).')->success()->send();
                     }),
 
-                // 4. Admin Action: Ajukan ke Google Form (Pak Jejen & Pak Yoga)
+                // 3.1 Admin Tolak
+                Tables\Actions\Action::make('admin_reject')
+                    ->label('Tolak Admin')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user || (!$user->isAdmin() && !$user->isSuperAdmin())) return false;
+                        return in_array($record->approval_status, ['ACC_RGM', 'DITOLAK_FINANCE']) ||
+                               ($record->approval_status === 'DIAJUKAN' && ($record->effective_employee?->isRgm() || $record->user?->isRgm()));
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('rejection_reason')
+                            ->label('Alasan Penolakan Admin')
+                            ->placeholder('Tuliskan rincian yang perlu diperbaiki pemohon...')
+                            ->required(),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $record->update([
+                            'approval_status' => 'DITOLAK',
+                            'rejection_reason' => $data['rejection_reason'],
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin ditolak oleh Admin.')->warning()->send();
+                    }),
+
+                // 3.2 Admin Action: Ajukan ke Google Form (Pak Jejen & Pak Yoga)
                 Tables\Actions\Action::make('submit_to_gform')
                     ->label('Ajukan ke G-Form Atasan')
                     ->icon('heroicon-o-arrow-up-tray')
@@ -892,7 +1102,7 @@ class PerdinClaimResource extends Resource
                         if (!$user) return false;
                         return !$record->admin_gform_submitted && 
                                ($user->isAdmin() || $user->isSuperAdmin()) &&
-                               in_array($record->approval_status, ['ACC_RGM', 'ACC_PAK_JEJEN', 'DISETUJUI', 'DIAJUKAN']);
+                               in_array($record->approval_status, ['ACC_RGM', 'ACC_ADMIN', 'DISETUJUI', 'DIAJUKAN']);
                     })
                     ->form([
                         Forms\Components\TextInput::make('admin_gform_url')
@@ -910,27 +1120,236 @@ class PerdinClaimResource extends Resource
                         Notification::make()->title('Pengajuan Perdin berhasil diteruskan ke Google Form Management!')->success()->send();
                     }),
 
-                // 4.1 Admin Verifikasi & Setujui -> Kirim ke Finance
-                Tables\Actions\Action::make('admin_verify_approve')
-                    ->label('Verifikasi & Kirim ke Finance')
-                    ->icon('heroicon-o-check-badge')
+                // 4. Approval Action: ACC Pak Jejen (Head of Sales) -> Teruskan sesuai Badan Usaha (Item 17)
+                Tables\Actions\Action::make('acc_jejen')
+                    ->label('ACC Pak Jejen')
+                    ->icon('heroicon-o-star')
                     ->color('success')
                     ->visible(function (Claim $record) {
                         $user = auth()->user();
-                        if (!$user || (!$user->isAdmin() && !$user->isSuperAdmin())) return false;
-                        return in_array($record->approval_status, ['ACC_PAK_JEJEN', 'ACC_RGM']);
+                        if (!$user) return false;
+                        return in_array($record->approval_status, ['ACC_ADMIN', 'ACC_RGM', 'DIAJUKAN']) && ($user->isJejen() || $user->isSuperAdmin());
                     })
                     ->requiresConfirmation()
-                    ->modalHeading('Verifikasi & Kirim ke Finance')
-                    ->modalDescription('Pastikan data form perdin dan persetujuan atasan telah sah. Pengajuan akan langsung diteruskan ke antrean Finance untuk pencairan.')
-                    ->action(function (Claim $record) {
+                    ->modalHeading('Konfirmasi Persetujuan Perdin (Head of Sales - Pak Jejen)')
+                    ->modalDescription(function (Claim $record) {
+                        $bu = strtoupper($record->badan_usaha ?? '');
+                        $isTopSelular = str_contains($bu, 'TOP') || str_contains($bu, 'COMPLETE') || str_contains($bu, 'CV');
+                        $nextRecipient = $isTopSelular ? 'Bu Thia Aisyah (Manajer Keuangan CV Top Selular)' : 'Pak Yoga P. Hadi (Manager Finance PT MSI)';
+                        return "Apakah Anda menyetujui pengajuan perjalanan dinas ini? Pengajuan akan diteruskan ke {$nextRecipient}.";
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan arahan atau catatan persetujuan jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $user = auth()->user();
+                        $bu = strtoupper($record->badan_usaha ?? '');
+                        $isTopSelular = str_contains($bu, 'TOP') || str_contains($bu, 'COMPLETE') || str_contains($bu, 'CV');
+
+                        if ($isTopSelular) {
+                            $nextStatus = 'WAITING_THIA';
+                            $msg = 'Pengajuan Perdin disetujui Pak Jejen! Diteruskan ke Bu Thia Aisyah (Manajer Keuangan CV Top Selular).';
+                        } else {
+                            $nextStatus = 'WAITING_YOGA';
+                            $msg = 'Pengajuan Perdin disetujui Pak Jejen! Diteruskan ke Pak Yoga P. Hadi (Manager Finance PT MSI).';
+                        }
+
+                        $record->update([
+                            'approval_status' => $nextStatus,
+                            'approved_by_jejen_id' => $user?->id,
+                            'approved_by_jejen_at' => now(),
+                            'jejen_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
+                        ]);
+                        Notification::make()->title($msg)->success()->send();
+                    }),
+
+                Tables\Actions\Action::make('reject_jejen')
+                    ->label('Tolak Pak Jejen')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return in_array($record->approval_status, ['ACC_ADMIN', 'ACC_RGM', 'DIAJUKAN']) && ($user->isJejen() || $user->isSuperAdmin());
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('rejection_reason')
+                            ->label('Alasan Penolakan Pak Jejen')
+                            ->placeholder('Tuliskan rincian yang perlu diperbaiki...')
+                            ->required(),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $record->update([
+                            'approval_status' => 'DITOLAK',
+                            'rejection_reason' => $data['rejection_reason'],
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin ditolak Pak Jejen.')->warning()->send();
+                    }),
+
+                // 4.1.A Approval Pak Yoga P. Hadi (Manager Finance PT MSI)
+                Tables\Actions\Action::make('approve_yoga')
+                    ->label('ACC Pak Yoga (Manager Finance)')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return $record->approval_status === 'WAITING_YOGA' && ($user->isYoga() || $user->isSuperAdmin());
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Konfirmasi Persetujuan Manager Finance (Pak Yoga P. Hadi)')
+                    ->modalDescription('Apakah Anda menyetujui pengajuan perjalanan dinas ini untuk diteruskan ke Koordinator Finance (Bu Nurbaiti Riaseha)?')
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan catatan atau instruksi jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $user = auth()->user();
+                        $record->update([
+                            'approval_status' => 'WAITING_NURBAITI',
+                            'approved_by_yoga_id' => $user?->id,
+                            'approved_by_yoga_at' => now(),
+                            'yoga_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin disetujui Pak Yoga! Diteruskan ke Bu Nurbaiti Riaseha (Koordinator Finance).')->success()->send();
+                    }),
+
+                Tables\Actions\Action::make('reject_yoga')
+                    ->label('Tolak Pak Yoga')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return $record->approval_status === 'WAITING_YOGA' && ($user->isYoga() || $user->isSuperAdmin());
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('rejection_reason')
+                            ->label('Alasan Penolakan Pak Yoga')
+                            ->placeholder('Tuliskan rincian yang perlu diperbaiki...')
+                            ->required(),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $record->update([
+                            'approval_status' => 'DITOLAK',
+                            'rejection_reason' => $data['rejection_reason'],
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin ditolak Pak Yoga.')->warning()->send();
+                    }),
+
+                // 4.1.B Approval Bu Nurbaiti Riaseha (Koordinator Finance PT MSI)
+                Tables\Actions\Action::make('approve_nurbaiti')
+                    ->label('ACC Bu Nurbaiti (Koordinator Finance)')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return $record->approval_status === 'WAITING_NURBAITI' && ($user->isNurbaiti() || $user->isSuperAdmin());
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Konfirmasi Persetujuan Koordinator Finance (Bu Nurbaiti Riaseha)')
+                    ->modalDescription('Apakah Anda menyetujui pengajuan perjalanan dinas ini untuk diteruskan ke Finance Media Selular Indonesia untuk proses pencairan dana?')
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan catatan atau instruksi jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
                         $user = auth()->user();
                         $record->update([
                             'approval_status' => 'DISETUJUI',
-                            'admin_approved_by_id' => $user?->id,
-                            'admin_approved_at' => now(),
+                            'approved_by_nurbaiti_id' => $user?->id,
+                            'approved_by_nurbaiti_at' => now(),
+                            'nurbaiti_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
                         ]);
-                        Notification::make()->title('Pengajuan Perdin telah disetujui Admin dan diteruskan ke Finance!')->success()->send();
+                        Notification::make()->title('Pengajuan Perdin disetujui Bu Nurbaiti! Diteruskan ke antrean pencairan Finance Media Selular Indonesia.')->success()->send();
+                    }),
+
+                Tables\Actions\Action::make('reject_nurbaiti')
+                    ->label('Tolak Bu Nurbaiti')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return $record->approval_status === 'WAITING_NURBAITI' && ($user->isNurbaiti() || $user->isSuperAdmin());
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('rejection_reason')
+                            ->label('Alasan Penolakan Bu Nurbaiti')
+                            ->placeholder('Tuliskan rincian yang perlu diperbaiki...')
+                            ->required(),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $record->update([
+                            'approval_status' => 'DITOLAK',
+                            'rejection_reason' => $data['rejection_reason'],
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin ditolak Bu Nurbaiti.')->warning()->send();
+                    }),
+
+                // 4.1.C Approval Thia Aisyah (Manajer Keuangan CV Top Selular)
+                Tables\Actions\Action::make('approve_thia')
+                    ->label('ACC Bu Thia Aisyah (Manajer Keuangan)')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return $record->approval_status === 'WAITING_THIA' && ($user->isThia() || $user->isSuperAdmin());
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Konfirmasi Persetujuan Manajer Keuangan (Thia Aisyah)')
+                    ->modalDescription('Apakah Anda menyetujui pengajuan perjalanan dinas ini untuk diteruskan ke Finance CV Top Selular untuk proses pencairan dana?')
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan catatan atau instruksi jika ada...')
+                            ->rows(2),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $user = auth()->user();
+                        $record->update([
+                            'approval_status' => 'DISETUJUI',
+                            'approved_by_thia_id' => $user?->id,
+                            'approved_by_thia_at' => now(),
+                            'thia_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin disetujui Bu Thia Aisyah! Diteruskan ke antrean pencairan Finance CV Top Selular.')->success()->send();
+                    }),
+
+                Tables\Actions\Action::make('reject_thia')
+                    ->label('Tolak Bu Thia Aisyah')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(function (Claim $record) {
+                        $user = auth()->user();
+                        if (!$user) return false;
+                        return $record->approval_status === 'WAITING_THIA' && ($user->isThia() || $user->isSuperAdmin());
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('rejection_reason')
+                            ->label('Alasan Penolakan Bu Thia Aisyah')
+                            ->placeholder('Tuliskan rincian yang perlu diperbaiki...')
+                            ->required(),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $record->update([
+                            'approval_status' => 'DITOLAK',
+                            'rejection_reason' => $data['rejection_reason'],
+                        ]);
+                        Notification::make()->title('Pengajuan Perdin ditolak Bu Thia Aisyah.')->warning()->send();
                     }),
 
                 // 4.2 Admin Kirim Ulang ke Finance setelah revisi data
@@ -956,7 +1375,7 @@ class PerdinClaimResource extends Resource
                         Notification::make()->title('Revisi pengajuan Perdin berhasil dikirimkan kembali ke Finance!')->success()->send();
                     }),
 
-                // 5. Finance Action: Pencairan Dana & Upload Bukti Transfer
+                // 5. Finance Action: Pencairan Dana & Upload Bukti Transfer (MSI atau Complete Selular)
                 Tables\Actions\Action::make('disburse_perdin')
                     ->label('Cairkan Dana')
                     ->icon('heroicon-o-banknotes')
@@ -964,8 +1383,19 @@ class PerdinClaimResource extends Resource
                     ->visible(function (Claim $record) {
                         $user = auth()->user();
                         if (!$user) return false;
-                        return ($user->isFinance() || $user->isAdmin() || $user->isSuperAdmin()) &&
-                               $record->disbursement_status !== 'Sudah Dicairkan';
+                        if ($record->disbursement_status === 'Sudah Dicairkan') return false;
+                        if ($record->approval_status !== 'DISETUJUI') return false;
+
+                        if ($user->isAdmin() || $user->isSuperAdmin()) return true;
+
+                        if ($user->isFinance()) {
+                            if (!empty($user->badan_usaha) && !empty($record->badan_usaha)) {
+                                return strtoupper($user->badan_usaha) === strtoupper($record->badan_usaha);
+                            }
+                            return true;
+                        }
+
+                        return false;
                     })
                     ->form([
                         Forms\Components\TextInput::make('kwitansi_number')
@@ -997,139 +1427,278 @@ class PerdinClaimResource extends Resource
 
                 // 6. Cetak Kwitansi Resmi Perdin (Format Cyan Voucher)
                 Tables\Actions\Action::make('print_kwitansi')
-                    ->label('Cetak Kwitansi')
-                    ->icon('heroicon-o-printer')
+                    ->label('Kwitansi Makan')
+                    ->icon('heroicon-o-receipt-percent')
                     ->color('info')
-                    ->visible(fn (Claim $record) => $record->disbursement_status === 'Sudah Dicairkan' || !empty($record->transfer_proof_photo))
-                    ->modalHeading('Kwitansi Resmi Perjalanan Dinas')
+                    ->visible(fn (Claim $record) => (float)$record->meal_allowance > 0)
+                    ->modalHeading('Kwitansi Resmi Uang Makan Perjalanan Dinas')
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Tutup')
                     ->modalContent(fn (Claim $record) => view('filament.modals.kwitansi-perdin', ['record' => $record])),
 
                 // 7. Post-Trip: Pemohon Mengirimkan Nota Balik & Pengembalian Sisa Dana (Max H+1)
                 Tables\Actions\Action::make('submit_nota_balik')
-                    ->label('Kirim Nota Balik')
+                    ->label(fn (Claim $record) => $record->nota_balik_status === 'Ditolak Finance' ? 'Revisi Nota Balik' : 'Kirim Nota Balik')
                     ->icon('heroicon-o-receipt-percent')
-                    ->color('warning')
+                    ->color(fn (Claim $record) => $record->nota_balik_status === 'Ditolak Finance' ? 'danger' : 'warning')
                     ->visible(function (Claim $record) {
                         $user = auth()->user();
                         if (!$user) return false;
                         $isApplicant = ($user->getEffectiveEmployeeId() == $record->employee_id);
-                        return $record->disbursement_status === 'Sudah Dicairkan' &&
-                               !$record->nota_balik_submitted &&
+                        $canSubmit = (!$record->nota_balik_submitted || $record->nota_balik_status === 'Ditolak Finance');
+                        return ($record->disbursement_status === 'Sudah Dicairkan' || $record->approval_status === 'DISETUJUI') &&
+                               $canSubmit &&
                                ($isApplicant || $user->isAdmin() || $user->isSuperAdmin());
                     })
+                    ->modalHeading('Pertanggungjawaban Nota Balik & Realisasi Biaya')
+                    ->modalDescription('Masukkan realisasi biaya riil yang telah terpakai. Sistem akan otomatis menghitung riwayat per biaya dan nominal sisa dana yang harus dikembalikan.')
+                    ->modalSubmitActionLabel('Kirim Nota Balik ke Finance')
                     ->form([
-                        Forms\Components\Placeholder::make('deadline_info')
-                            ->label('Batas Akhir Penyerahan Nota Balik')
-                            ->content(fn (Claim $record) => 'Maksimal H+1: ' . ($record->perdin_return_deadline ? $record->perdin_return_deadline->translatedFormat('d F Y') : '-')),
+                        Forms\Components\Placeholder::make('info_diajukan')
+                            ->label('Ringkasan Dana Awal yang Dicairkan')
+                            ->content(fn (Claim $record) => new \Illuminate\Support\HtmlString(
+                                "<div class='text-sm space-y-1 bg-slate-50 dark:bg-slate-900/40 p-3 rounded border border-slate-200 dark:border-slate-800'>" .
+                                "<div><strong>Total Uang Muka:</strong> Rp " . number_format($record->amount, 0, ',', '.') . "</div>" .
+                                "<div class='text-xs text-slate-500'>Uang Makan: Rp " . number_format($record->meal_allowance, 0, ',', '.') . 
+                                " | BBM: Rp " . number_format($record->fuel_cost, 0, ',', '.') . 
+                                " | Tol/Tiket: Rp " . number_format($record->toll_cost, 0, ',', '.') . 
+                                " | Sewa: Rp " . number_format($record->car_rental_cost, 0, ',', '.') . "</div>" .
+                                ($record->nota_balik_rejection_reason ? "<div class='text-xs font-bold text-red-600 mt-2'>⚠️ Catatan Penolakan Finance Sebelumnya: {$record->nota_balik_rejection_reason}</div>" : "") .
+                                "</div>"
+                            )),
+
+                        Forms\Components\Section::make('Rincian Realisasi Biaya yang Terpakai')
+                            ->description('Ketikkan nominal yang benar-benar terpakai selama dinas:')
+                            ->schema([
+                                Forms\Components\TextInput::make('actual_meal_allowance')
+                                    ->label('Realisasi Uang Makan (Rp)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(fn (Claim $record) => $record->actual_meal_allowance > 0 ? $record->actual_meal_allowance : $record->meal_allowance)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, Claim $record) => self::recalculateNotaBalik($get, $set, $record)),
+
+                                Forms\Components\TextInput::make('actual_fuel_cost')
+                                    ->label('Realisasi BBM (Rp)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(fn (Claim $record) => $record->actual_fuel_cost > 0 ? $record->actual_fuel_cost : $record->fuel_cost)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, Claim $record) => self::recalculateNotaBalik($get, $set, $record)),
+
+                                Forms\Components\TextInput::make('actual_travel_cost')
+                                    ->label('Realisasi Travel (Rp)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(fn (Claim $record) => $record->actual_travel_cost > 0 ? $record->actual_travel_cost : $record->travel_cost)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, Claim $record) => self::recalculateNotaBalik($get, $set, $record)),
+
+                                Forms\Components\TextInput::make('actual_car_rental_cost')
+                                    ->label('Realisasi Sewa Motor (Rp)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(fn (Claim $record) => $record->actual_car_rental_cost > 0 ? $record->actual_car_rental_cost : $record->car_rental_cost)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, Claim $record) => self::recalculateNotaBalik($get, $set, $record)),
+
+                                Forms\Components\TextInput::make('actual_other_transport_cost')
+                                    ->label('Realisasi Lainnya / Tol (Rp)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->default(fn (Claim $record) => ($record->actual_other_transport_cost > 0 ? $record->actual_other_transport_cost : ($record->actual_toll_cost > 0 ? $record->actual_toll_cost : ($record->other_transport_cost > 0 ? $record->other_transport_cost : $record->toll_cost))))
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Get $get, Forms\Set $set, Claim $record) => self::recalculateNotaBalik($get, $set, $record)),
+                            ])->columns(3),
+
+                        Forms\Components\Grid::make(2)
+                            ->schema([
+                                Forms\Components\TextInput::make('actual_amount_total')
+                                    ->label('Total Biaya Terpakai (Rp)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->disabled()
+                                    ->dehydrated()
+                                    ->default(fn (Claim $record) => (float)($record->actual_amount_total > 0 ? $record->actual_amount_total : $record->amount)),
+
+                                Forms\Components\TextInput::make('remaining_amount_calculated')
+                                    ->label('Sisa Dana Pengembalian (Otomatis)')
+                                    ->numeric()
+                                    ->prefix('Rp')
+                                    ->disabled()
+                                    ->dehydrated()
+                                    ->default(fn (Claim $record) => (float)($record->remaining_amount_calculated ?: 0))
+                                    ->extraAttributes(['class' => 'font-bold text-emerald-600']),
+                            ]),
+
+                        Forms\Components\Placeholder::make('info_kwitansi_otomatis')
+                            ->label('Kwitansi Resmi Uang Makan')
+                            ->content(new \Illuminate\Support\HtmlString('
+                                <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+                                    <strong><span class="inline-block mr-1">ℹ️</span> Kwitansi Makan Otomatis:</strong> Kwitansi Uang Makan resmi secara otomatis disertakan ke dalam berkas Nota Balik ini sebagai pengganti struk makan fisik. Anda tidak perlu mengunggah struk makan.
+                                </div>
+                            ')),
+
+                        Forms\Components\Placeholder::make('info_pengembalian_dana')
+                            ->label('Ketentuan Sisa Dana')
+                            ->content(new \Illuminate\Support\HtmlString('
+                                <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+                                    <strong><span class="inline-block mr-1">⚠️</span> Bukti Transfer Belum Perlu Diunggah:</strong> Silakan unggah seluruh bukti nota fisik transportasi/BBM/tiket terlebih dahulu. Setelah Finance memverifikasi seluruh bukti, sistem akan mengirimkan notifikasi petunjuk pengembalian sisa dana (jika ada).
+                                </div>
+                            ')),
 
                         Forms\Components\FileUpload::make('photos')
-                            ->label('Upload Seluruh Foto Bukti Nota Fisik Pengeluaran (Tiket, Bon Makan, Hotel, Tol)')
+                            ->label('Upload Seluruh Foto Bukti Nota Fisik Pengeluaran (Tiket, Struk SPBU, Tol)')
                             ->image()
-                            ->imageResizeMode('contain')
-                            ->imageResizeTargetWidth('1920')
-                            ->imageResizeTargetHeight('1920')
-                            ->imageResizeUpscale(false)
                             ->multiple()
                             ->disk('public')
                             ->directory('claim-photos')
                             ->visibility('public')
+                            ->helperText('Upload foto struk BBM dari SPBU, tiket, atau karcis tol. Kwitansi uang makan otomatis disertakan oleh sistem.')
                             ->required(),
-
-                        Forms\Components\TextInput::make('return_transfer_amount')
-                            ->label('Nominal Sisa Dana Dikembalikan ke Finance (Rp)')
-                            ->numeric()
-                            ->prefix('Rp')
-                            ->default(0)
-                            ->helperText('Isi jika ada kelebihan uang muka yang dikembalikan ke rekening Finance'),
-
-                        Forms\Components\FileUpload::make('return_transfer_proof')
-                            ->label('Foto Bukti Transfer Pengembalian Sisa Dana ke Finance')
-                            ->image()
-                            ->imageResizeMode('contain')
-                            ->imageResizeTargetWidth('1920')
-                            ->imageResizeTargetHeight('1920')
-                            ->imageResizeUpscale(false)
-                            ->disk('public')
-                            ->directory('claim-transfer-proofs')
-                            ->visibility('public')
-                            ->helperText('Wajib dilampirkan jika terdapat sisa dana yang dikembalikan'),
                     ])
                     ->action(function (Claim $record, array $data) {
+                        $actualMeal = (float)($data['actual_meal_allowance'] ?? $record->meal_allowance);
+                        $actualFuel = (float)($data['actual_fuel_cost'] ?? $record->fuel_cost);
+                        $actualTravel = (float)($data['actual_travel_cost'] ?? $record->travel_cost);
+                        $actualRental = (float)($data['actual_car_rental_cost'] ?? $record->car_rental_cost);
+                        $actualOther = (float)($data['actual_other_transport_cost'] ?? ($data['actual_toll_cost'] ?? $record->toll_cost));
+
+                        $actualTotal = $actualMeal + $actualFuel + $actualTravel + $actualRental + $actualOther;
+                        $remaining = max(0, ((float)$record->amount) - $actualTotal);
+
                         $record->update([
+                            'actual_meal_allowance' => $actualMeal,
+                            'actual_fuel_cost' => $actualFuel,
+                            'actual_travel_cost' => $actualTravel,
+                            'actual_car_rental_cost' => $actualRental,
+                            'actual_other_transport_cost' => $actualOther,
+                            'actual_toll_cost' => $actualOther,
+                            'actual_amount_total' => $actualTotal,
+                            'remaining_amount_calculated' => $remaining,
                             'photos' => $data['photos'] ?? $record->photos,
-                            'return_transfer_amount' => $data['return_transfer_amount'] ?? 0,
-                            'return_transfer_proof' => $data['return_transfer_proof'] ?? null,
                             'nota_balik_submitted' => true,
                             'nota_balik_submitted_at' => now(),
+                            'nota_balik_status' => 'Menunggu Verifikasi Finance',
+                            'nota_balik_rejection_reason' => null,
                         ]);
-                        Notification::make()->title('Nota balik dan bukti sisa dana berhasil dikirim ke Admin!')->success()->send();
+
+                        Notification::make()
+                            ->title('Nota Balik Berhasil Diserahkan!')
+                            ->body("Realisasi Rp " . number_format($actualTotal, 0, ',', '.') . " | Sisa Dana: Rp " . number_format($remaining, 0, ',', '.') . ". Kwitansi uang makan otomatis terlampir. Menunggu verifikasi tim Finance.")
+                            ->success()
+                            ->send();
                     }),
 
-                // 8. Admin Region: Verifikasi Selesai Nota Balik & Sisa Dana
-                Tables\Actions\Action::make('verify_admin_perdin')
-                    ->label('Verifikasi Selesai (ACC)')
+                // 8. Finance / Admin: ACC Verifikasi Nota Balik
+                Tables\Actions\Action::make('approve_nota_balik_finance')
+                    ->label('ACC Nota Balik')
                     ->icon('heroicon-o-check-badge')
                     ->color('success')
                     ->visible(function (Claim $record) {
                         $user = auth()->user();
                         if (!$user) return false;
                         return $record->nota_balik_submitted &&
-                               $record->approval_status !== 'DISETUJUI' &&
-                               ($user->isAdmin() || $user->isSuperAdmin());
+                               $record->nota_balik_status !== 'Disetujui Finance' &&
+                               ($user->isFinance() || $user->isAdmin() || $user->isSuperAdmin());
                     })
                     ->requiresConfirmation()
-                    ->modalHeading('Verifikasi Selesai Pertanggungjawaban Perjalanan Dinas')
-                    ->modalDescription('Pastikan nota fisik, tiket, dan bukti transfer pengembalian sisa dana ke Finance telah diverifikasi lengkap dan sesuai.')
+                    ->modalHeading('Verifikasi & ACC Nota Balik Perdin')
+                    ->modalDescription(function (Claim $record) {
+                        $desc = "Apakah seluruh nota fisik dan rincian realisasi (Total: Rp " . number_format((float)$record->actual_amount_total, 0, ',', '.') . ") telah diverifikasi sesuai?";
+                        if ((float)$record->remaining_amount_calculated > 0) {
+                            $desc .= " Terdapat sisa dana Rp " . number_format((float)$record->remaining_amount_calculated, 0, ',', '.') . " yang akan dinotifikasikan ke pemohon untuk dikembalikan.";
+                        }
+                        return $desc;
+                    })
                     ->action(function (Claim $record) {
                         $record->update([
-                            'approval_status' => 'DISETUJUI',
+                            'nota_balik_status' => 'Disetujui Finance',
                             'nota_balik_finance_sent' => true,
                             'nota_balik_finance_sent_at' => now(),
                         ]);
-                        Notification::make()->title('Pertanggungjawaban Perjalanan Dinas selesai dan telah disetujui Admin!')->success()->send();
+
+                        // Item 9: Berikan notifikasi jika terdapat sisa dana pengembalian
+                        $remaining = (float)$record->remaining_amount_calculated;
+                        if ($remaining > 0) {
+                            $remainingFmt = 'Rp ' . number_format($remaining, 0, ',', '.');
+                            $recipient = $record->user ?? ($record->employee?->user);
+                            if ($recipient) {
+                                Notification::make()
+                                    ->title('Verifikasi Selesai: Pengembalian Sisa Dana Perdin')
+                                    ->body("Nota balik UID {$record->uid} telah diverifikasi. Terdapat sisa dana sebesar {$remainingFmt} yang harus dikembalikan ke rekening kas Finance.")
+                                    ->warning()
+                                    ->sendToDatabase($recipient);
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Nota Balik Disetujui Finance!')
+                            ->body('Pertanggungjawaban perdin telah dinyatakan lengkap dan disetujui.' . ($remaining > 0 ? ' Notifikasi pengembalian dana telah dikirim ke pemohon.' : ''))
+                            ->success()
+                            ->send();
                     }),
 
-                // 8.1 Admin Region: Minta Perbaikan Nota Balik
-                Tables\Actions\Action::make('reject_nota_balik')
-                    ->label('Minta Perbaikan Nota')
-                    ->icon('heroicon-o-arrow-uturn-left')
+                // 8.1 Finance / Admin: Tolak Nota Balik dengan Catatan (Item 16)
+                Tables\Actions\Action::make('reject_nota_balik_finance')
+                    ->label('Tolak Nota Balik')
+                    ->icon('heroicon-o-x-circle')
                     ->color('danger')
                     ->visible(function (Claim $record) {
                         $user = auth()->user();
                         if (!$user) return false;
                         return $record->nota_balik_submitted &&
-                               $record->approval_status !== 'DISETUJUI' &&
-                               ($user->isAdmin() || $user->isSuperAdmin());
+                               $record->nota_balik_status !== 'Disetujui Finance' &&
+                               ($user->isFinance() || $user->isAdmin() || $user->isSuperAdmin());
                     })
                     ->form([
-                        Forms\Components\Textarea::make('rejection_reason')
-                            ->label('Catatan Perbaikan Nota Balik')
-                            ->placeholder('Jelaskan nota fisik, tiket, atau bukti transfer sisa dana yang perlu diperbaiki oleh pemohon...')
-                            ->required(),
+                        Forms\Components\Textarea::make('nota_balik_rejection_reason')
+                            ->label('Alasan Penolakan Nota Balik')
+                            ->placeholder('Contoh: Foto nota BBM tidak jelas / Foto bukti transfer pengembalian sisa dana belum dilampirkan / Jumlah tidak sesuai...')
+                            ->required()
+                            ->rows(3),
                     ])
                     ->action(function (Claim $record, array $data) {
                         $record->update([
+                            'nota_balik_status' => 'Ditolak Finance',
+                            'nota_balik_rejection_reason' => $data['nota_balik_rejection_reason'],
                             'nota_balik_submitted' => false,
-                            'rejection_reason' => $data['rejection_reason'],
                         ]);
-                        Notification::make()->title('Permintaan perbaikan nota balik telah dikirimkan ke pemohon.')->warning()->send();
+
+                        Notification::make()
+                            ->title('Nota Balik Ditolak Finance')
+                            ->body('Catatan perbaikan telah dikirimkan ke pemohon.')
+                            ->danger()
+                            ->send();
                     }),
 
                 \App\Filament\Actions\ViewTransferProofAction::make(),
 
-                // 9. Admin Region: Export Excel Realisasi Biaya (Format Voucher Resmi Standar Sama dengan Transport/Entertain)
+                // 9. Admin Region: Export PDF Form Perdin (Item 6) & Nota Balik (Item 15)
                 Tables\Actions\Action::make('export_pdf')
-                    ->label('Export PDF')
+                    ->label('PDF Perdin')
                     ->icon('heroicon-o-document-arrow-down')
                     ->color('danger')
-                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportSingleClaimPdf($record)),
+                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportPerdinSinglePdf($record)),
+
+                Tables\Actions\Action::make('export_nota_balik_pdf')
+                    ->label('PDF Nota Balik')
+                    ->icon('heroicon-o-document-text')
+                    ->color('success')
+                    ->visible(fn (Claim $record) => $record->nota_balik_submitted || (float)$record->actual_amount_total > 0)
+                    ->action(fn (Claim $record) => app(\App\Services\ClaimPdfExportService::class)->exportNotaBalikSinglePdf($record)),
+
+                Tables\Actions\Action::make('export_nota_balik_excel')
+                    ->label('Excel Nota Balik')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('success')
+                    ->visible(fn (Claim $record) => $record->nota_balik_submitted || (float)$record->actual_amount_total > 0)
+                    ->action(fn (Claim $record) => app(ClaimExcelExportService::class)->exportNotaBalikSingleExcel($record)),
 
                 Tables\Actions\Action::make('export_excel')
                     ->label('Excel')
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->color('success')
+                    ->color('info')
                     ->visible(fn () => auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin())
                     ->action(fn (Claim $record) => app(ClaimExcelExportService::class)->exportSingleClaim($record)),
 
@@ -1144,7 +1713,14 @@ class PerdinClaimResource extends Resource
                     ->visible(fn (Claim $record) => static::canEdit($record)),
 
                 Tables\Actions\DeleteAction::make()
-                    ->visible(fn (Claim $record) => in_array($record->approval_status, ['DRAFT', 'DITOLAK'])),
+                    ->visible(fn (Claim $record) => static::canDelete($record)),
+                ]),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\DeleteBulkAction::make()
+                        ->visible(fn () => auth()->user()?->isAdmin() || auth()->user()?->isSuperAdmin()),
+                ]),
             ]);
     }
 

@@ -79,6 +79,12 @@ class AsmClaimApprovalResource extends Resource
 
         $query = parent::getEloquentQuery()
             ->with(['employee.role', 'employee.positionModel', 'branch', 'claimPeriod.employee'])
+            ->where(function (Builder $q) {
+                // ASM tidak menyetujui klaim milik ASM atau RGM lain
+                $q->whereDoesntHave('employee.role', fn ($rq) => $rq->where('code', 'like', '%ASM%')->orWhere('code', 'like', '%RGM%'))
+                  ->whereDoesntHave('employee.positionModel', fn ($pq) => $pq->where('name', 'like', '%ASM%')->orWhere('name', 'like', '%RGM%'))
+                  ->whereDoesntHave('user', fn ($uq) => $uq->whereHas('role', fn ($rq) => $rq->where('code', 'like', '%ASM%')->orWhere('code', 'like', '%RGM%')));
+            })
             ->latest('claim_date');
 
         if ($user && !$user->isSuperAdmin()) {
@@ -109,6 +115,16 @@ class AsmClaimApprovalResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('_uid')
+                    ->label('_UID')
+                    ->badge()
+                    ->color('info')
+                    ->weight('bold')
+                    ->placeholder('-')
+                    ->searchable()
+                    ->sortable()
+                    ->copyable(),
+
                 Tables\Columns\TextColumn::make('claim_category')
                     ->label('Kategori')
                     ->badge()
@@ -134,14 +150,18 @@ class AsmClaimApprovalResource extends Resource
 
                 Tables\Columns\TextColumn::make('effective_employee.name')
                     ->label('Pemohon')
-                    ->description(fn (Claim $record) => ($record->effective_employee?->position_name ?? 'Sales') . ' - ' . ($record->branch?->name ?? $record->region ?? '-'))
+                    ->description(fn (Claim $record) => \Illuminate\Support\Str::limit(
+                        ($record->effective_employee?->position_name ?? 'Sales') . ' - ' . ($record->branch?->name ?? $record->region ?? '-'),
+                        40
+                    ))
                     ->searchable()
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('purpose_string')
                     ->label('Keperluan / Tujuan')
                     ->limit(35)
-                    ->tooltip(fn ($state) => $state),
+                    ->tooltip(fn ($state) => $state)
+                    ->visibleFrom('md'),
 
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Nominal')
@@ -180,7 +200,7 @@ class AsmClaimApprovalResource extends Resource
                 Tables\Filters\SelectFilter::make('claim_category')
                     ->label('Kategori Klaim')
                     ->options([
-                        'bbm' => 'Klaim BBM',
+                        'bbm' => 'Nota Balik BBM',
                         'transport_entertain' => 'Klaim Transport & Entertain',
                         'perdin' => 'Perjalanan Dinas',
                         'service' => 'Service Motor',
@@ -204,14 +224,10 @@ class AsmClaimApprovalResource extends Resource
                 // Lihat Berkas
                 \App\Filament\Actions\ViewClaimFilesAction::make(),
 
-                // Detail
-                Tables\Actions\ViewAction::make()
-                    ->label('Detail')
-                    ->color('gray'),
-
                 // ACC ASM Action
                 Tables\Actions\Action::make('acc_asm')
                     ->label('ACC ASM')
+                    ->button()
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->visible(fn (Claim $record) => $record->approval_status === 'DIAJUKAN')
@@ -235,6 +251,7 @@ class AsmClaimApprovalResource extends Resource
                 // Tolak ASM Action
                 Tables\Actions\Action::make('reject_asm')
                     ->label('Tolak')
+                    ->button()
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
                     ->visible(fn (Claim $record) => $record->approval_status === 'DIAJUKAN')

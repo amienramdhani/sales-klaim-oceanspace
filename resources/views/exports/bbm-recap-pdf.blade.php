@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Rekapitulasi Klaim BBM - PT Media Selular Indonesia</title>
+    <title>Rekapitulasi Nota Balik BBM - PT Media Selular Indonesia</title>
     <style>
         @page {
             margin: 18px 20px 20px 20px;
@@ -143,15 +143,15 @@
                 <div class="company-subtitle">Jl. Tuparev No. 109F Kertawinangun, Kedawung - Cirebon 45153</div>
             </td>
             <td style="width: 30%; text-align: right; vertical-align: middle;">
-                <div style="font-size: 9px; font-weight: bold; color: #0f766e;">REKAP KLAIM OPERASIONAL</div>
+                <div style="font-size: 9px; font-weight: bold; color: #0f766e;">REKAP NOTA BALIK BBM OPERASIONAL</div>
                 <div style="font-size: 7.5px; color: #64748b;">Dicetak: {{ date('d/m/Y H:i') }} WIB</div>
             </td>
         </tr>
     </table>
 
-    <div class="report-title">REKAPITULASI PENGAJUAN KLAIM BAHAN BAKAR MINYAK (BBM)</div>
+    <div class="report-title">REKAPITULASI PENGAJUAN NOTA BALIK BAHAN BAKAR MINYAK (BBM)</div>
     <div class="report-period">
-        {{ $periodLabel }} | Total: {{ count($claims) }} Pengajuan Klaim
+        {{ $periodLabel }} | Total: {{ count($claims) }} Pengajuan Nota Balik BBM
     </div>
 
     <!-- METRIK RINGKASAN -->
@@ -169,7 +169,7 @@
         <tr>
             <td style="width: 25%; padding: 0 3px;">
                 <div class="metric-card">
-                    <div class="metric-label">TOTAL PENGAJUAN BBM</div>
+                    <div class="metric-label">TOTAL PENGAJUAN NOTA BALIK BBM</div>
                     <div class="metric-val">{{ count($claims) }} Transaksi</div>
                 </div>
             </td>
@@ -259,7 +259,7 @@
             @empty
                 <tr>
                     <td colspan="13" class="text-center" style="color: #94a3b8; padding: 15px;">
-                        Tidak ada data klaim BBM untuk filter ini.
+                        Tidak ada data nota balik BBM untuk filter ini.
                     </td>
                 </tr>
             @endforelse

@@ -25,22 +25,49 @@ class ListFinanceNonBbmClaims extends ListRecords
 
     public function getTabs(): array
     {
-        $pendingCount = Claim::pendingFinanceNonBbmDisbursement()->count();
-        $revisionCount = Claim::where('approval_status', 'DITOLAK_FINANCE')
+        $user = auth()->user();
+        $bu = $user?->badan_usaha;
+        $applyBu = function (Builder $q) use ($bu) {
+            if (!empty($bu)) {
+                $upper = strtoupper(trim($bu));
+                $q->where(function (Builder $sub) use ($upper) {
+                    $sub->whereRaw('UPPER(badan_usaha) LIKE ?', ["%{$upper}%"])
+                        ->orWhereRaw('UPPER(company) LIKE ?', ["%{$upper}%"]);
+                });
+            }
+        };
+
+        $pendingCount = Claim::pendingFinanceNonBbmDisbursement()->where($applyBu)->count();
+        $waitingAtasanCount = Claim::approvedByAdminWaitingExecutive()
             ->where(function (Builder $q) {
-                $q->whereNull('claim_category')
-                  ->orWhere('claim_category', '!=', 'bbm');
+                $q->whereNull('claim_category')->orWhere('claim_category', '!=', 'bbm');
             })
             ->where(function (Builder $q) {
-                $q->whereNull('claim_type')
-                  ->orWhere('claim_type', 'not like', '%BBM%');
-            })->count();
+                $q->whereNull('claim_type')->orWhere('claim_type', 'not like', '%BBM%');
+            })
+            ->where($applyBu)
+            ->count();
+
+        $revisionCount = Claim::where('approval_status', 'DITOLAK_FINANCE')
+            ->where(function (Builder $q) {
+                $q->whereNull('claim_category')->orWhere('claim_category', '!=', 'bbm');
+            })
+            ->where(function (Builder $q) {
+                $q->whereNull('claim_type')->orWhere('claim_type', 'not like', '%BBM%');
+            })
+            ->where($applyBu)
+            ->count();
 
         return [
-            'menunggu' => Tab::make('Menunggu Pencairan Langsung')
+            'menunggu' => Tab::make('Siap Dicairkan')
                 ->badge($pendingCount > 0 ? (string) $pendingCount : null)
                 ->badgeColor('success')
                 ->modifyQueryUsing(fn (Builder $query) => $query->pendingFinanceNonBbmDisbursement()),
+
+            'menunggu_atasan' => Tab::make('Proses Approval Atasan')
+                ->badge($waitingAtasanCount > 0 ? (string) $waitingAtasanCount : null)
+                ->badgeColor('warning')
+                ->modifyQueryUsing(fn (Builder $query) => $query->approvedByAdminWaitingExecutive()),
 
             'revisi' => Tab::make('Perlu Revisi Admin')
                 ->badge($revisionCount > 0 ? (string) $revisionCount : null)

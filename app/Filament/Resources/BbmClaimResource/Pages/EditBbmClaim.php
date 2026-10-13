@@ -42,35 +42,44 @@ class EditBbmClaim extends EditRecord
     protected function mutateFormDataBeforeSave(array $data): array
     {
         $user = auth()->user();
-        if ($user && $user->isFieldUser() && !$user->isAdmin() && !$user->isSuperAdmin()) {
-            $data['fuel_base_amount'] = $data['amount'] ?? 0;
-            $photos = $data['photos'] ?? [];
-            $photoBefore = is_array($photos) ? ($photos[0] ?? null) : null;
-            $photoAfter = is_array($photos) && count($photos) > 1 ? $photos[1] : null;
-
-            if (!empty($photoBefore)) {
-                $data['bbm_photo_before'] = $photoBefore;
-            }
-            if (!empty($photoAfter)) {
-                $data['bbm_photo_after'] = $photoAfter;
-            }
-
-            $data['items'] = [
-                [
-                    'claim_type' => 'BBM',
-                    'receipt_date' => $data['claim_date'] ?? now()->toDateString(),
-                    'fuel_type' => $data['fuel_type'] ?? 'Pertalite',
-                    'fuel_start_km' => $data['fuel_start_km'] ?? null,
-                    'fuel_base_amount' => $data['amount'] ?? 0,
-                    'amount' => $data['amount'] ?? 0,
-                    'bbm_photo_before' => $data['bbm_photo_before'] ?? $photoBefore,
-                    'bbm_photo_after' => $data['bbm_photo_after'] ?? $photoAfter,
-                ]
-            ];
+        if (!empty($data['items']) && is_array($data['items'])) {
+            $firstItem = reset($data['items']);
+            $data['fuel_start_km'] = $data['fuel_start_km'] ?? ($firstItem['fuel_start_km'] ?? null);
+            $data['fuel_type'] = $data['fuel_type'] ?? ($firstItem['fuel_type'] ?? 'Pertalite');
+            $data['bbm_photo_before'] = $data['bbm_photo_before'] ?? ($firstItem['bbm_photo_before'] ?? null);
+            $data['bbm_photo_after'] = $data['bbm_photo_after'] ?? ($firstItem['bbm_photo_after'] ?? null);
+            $totalAmount = array_sum(array_column($data['items'], 'amount'));
+            $totalBase = array_sum(array_column($data['items'], 'fuel_base_amount'));
+            $data['amount'] = $totalAmount ?: ($data['amount'] ?? 0);
+            $data['fuel_base_amount'] = $totalBase ?: ($data['fuel_base_amount'] ?? $data['amount']);
         }
 
         if ($this->record && $this->record->approval_status === 'DITOLAK') {
             $data['approval_status'] = 'SEDANG_DIREVISI';
+        }
+
+        // Validasi Over Budget BBM: Wajib lampirkan Berita Acara (BA)
+        $empId = $data['employee_id'] ?? $this->record?->employee_id;
+        $emp = \App\Models\Employee::find($empId);
+        $budget = $emp ? (float)$emp->bbm_budget : 0.0;
+        $totalAmount = (float)($data['amount'] ?? 0);
+
+        if ($budget > 0 && $totalAmount > $budget) {
+            $data['return_transfer_amount'] = null;
+            $data['return_transfer_proof'] = null;
+            $data['return_transfer_notes'] = null;
+
+            $proof = $data['ba_wa_proof_photo'] ?? $this->record?->ba_wa_proof_photo;
+            if (empty($proof)) {
+                \Filament\Notifications\Notification::make()
+                    ->title('Wajib Melampirkan Berita Acara (BA)')
+                    ->body('Pengeluaran BBM sebesar Rp ' . number_format($totalAmount, 0, ',', '.') . ' melebihi budget plafon bulanan (Rp ' . number_format($budget, 0, ',', '.') . '). Anda wajib membuat Berita Acara (BA) dan mengunggah bukti persetujuannya.')
+                    ->danger()
+                    ->persistent()
+                    ->send();
+
+                $this->halt();
+            }
         }
 
         return $data;

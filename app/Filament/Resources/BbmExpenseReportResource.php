@@ -37,7 +37,7 @@ class BbmExpenseReportResource extends Resource
     public static function canViewAny(): bool
     {
         $user = auth()->user();
-        return $user && ($user->isAdmin() || $user->isSuperAdmin());
+        return $user && ($user->isAdmin() || $user->isSuperAdmin() || $user->isFinance());
     }
 
     public static function getEloquentQuery(): Builder

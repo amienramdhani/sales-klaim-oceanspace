@@ -13,7 +13,7 @@ class ListBbmClaims extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\CreateAction::make()->label('Tambah Klaim BBM'),
+            Actions\CreateAction::make()->label('Tambah Nota Balik BBM'),
         ];
     }
 }

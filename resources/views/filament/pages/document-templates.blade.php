@@ -94,7 +94,7 @@
                 <div class="w-12 h-12 rounded-xl bg-teal-100 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mb-4">
                     <x-heroicon-o-document-check class="w-7 h-7" />
                 </div>
-                <h2 class="text-base font-bold text-gray-900 dark:text-white">Form Klaim BBM (Word)</h2>
+                <h2 class="text-base font-bold text-gray-900 dark:text-white">Form Nota Balik BBM (Word)</h2>
                 <p class="text-xs text-gray-600 dark:text-gray-400 mt-2 leading-relaxed">
                     Dokumen cetak pengajuan klaim pengisian bahan bakar minyak operasional sales. Memuat kop resmi MSI, rincian SPBU, KM awal, volume liter, matrix tanda tangan approval, dan lampiran foto odometer.
                 </p>
@@ -105,7 +105,7 @@
             </div>
             <div class="mt-6 pt-4 border-t border-gray-100 dark:border-gray-800">
                 <x-filament::button wire:click="downloadBlankoFormKlaimBbmWord" color="info" icon="heroicon-o-arrow-down-tray" class="w-full">
-                    Unduh Form Klaim BBM Word
+                    Unduh Form Nota Balik BBM Word
                 </x-filament::button>
             </div>
         </div>
@@ -123,7 +123,7 @@
                 Dapat memilih lebih dari satu item pengeluaran. Kategori Entertain: Makan (memotong plafon) vs Lainnya (non plafon).
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
-                <span class="font-bold text-gray-800 dark:text-gray-200 block mb-1">2. Klaim BBM & Pertamax</span>
+                <span class="font-bold text-gray-800 dark:text-gray-200 block mb-1">2. Nota Balik BBM & Pertamax</span>
                 Pembelian Pertamax dihitung konversi liter x harga Pertalite (bisa diedit). Wajib upload odometer Before & After. Jika nominal bulat, wajib lampirkan Berita Acara.
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">

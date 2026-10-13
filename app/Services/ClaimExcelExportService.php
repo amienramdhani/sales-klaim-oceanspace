@@ -2926,7 +2926,35 @@ class ClaimExcelExportService
             $financeProofPath = Storage::disk('public')->path($claim->transfer_proof_photo);
         }
 
-        $hasAnyPhoto = !empty($bbmPairs) || !empty($generalPhotos) || !empty($returnProofPath) || !empty($financeProofPath) || !empty($items) || !empty($claim->bbm_photo_before) || !empty($claim->bbm_photo_after) || !empty($claim->bbm_photo_combined);
+        // 4. Attendance Sheets & Event Photos
+        $attendanceSheets = [];
+        $attendanceEventPhotos = [];
+
+        foreach ($items as $idx => $item) {
+            $isEntertain = ($item['claim_type'] ?? '') === 'Entertain';
+            $hasAttData = !empty($item['attendance_participants']) || !empty($item['attendance_purpose']);
+
+            if ($isEntertain && $hasAttData) {
+                $attendanceSheets[] = [
+                    'purpose' => $item['attendance_purpose'] ?? ($item['purpose'] ?? 'Pertemuan / Jamuan Makan'),
+                    'place' => $item['attendance_place'] ?? ($item['note'] ?? '-'),
+                    'date' => !empty($item['attendance_date']) ? date('d/m/Y', strtotime($item['attendance_date'])) : (!empty($item['receipt_date']) ? date('d/m/Y', strtotime($item['receipt_date'])) : '-'),
+                    'notes' => $item['attendance_notes'] ?? null,
+                    'participants' => $item['attendance_participants'] ?? [],
+                    'label' => 'Daftar Hadir #' . ($idx + 1) . ' - ' . ($item['attendance_purpose'] ?? ($item['purpose'] ?? 'Pertemuan / Jamuan Makan')),
+                ];
+            }
+
+            if (!empty($item['attendance_photos']) && is_array($item['attendance_photos'])) {
+                foreach ($item['attendance_photos'] as $ap) {
+                    if ($ap && Storage::disk('public')->exists($ap)) {
+                        $attendanceEventPhotos[] = Storage::disk('public')->path($ap);
+                    }
+                }
+            }
+        }
+
+        $hasAnyPhoto = !empty($bbmPairs) || !empty($generalPhotos) || !empty($attendanceSheets) || !empty($attendanceEventPhotos) || !empty($returnProofPath) || !empty($financeProofPath) || !empty($items) || !empty($claim->bbm_photo_before) || !empty($claim->bbm_photo_after) || !empty($claim->bbm_photo_combined);
         if (!$hasAnyPhoto) {
             return $currentRow;
         }
@@ -2992,41 +3020,176 @@ class ClaimExcelExportService
             $currentRow++;
         }
 
-        // SECTION B: FOTO NOTA FISIK / STRUK PEMBELIAN
-        if (!empty($generalPhotos)) {
+        // SECTION B: FOTO NOTA FISIK / STRUK PEMBELIAN & DAFTAR HADIR
+        $hasAttendance = !empty($attendanceSheets);
+        if (!empty($generalPhotos) || $hasAttendance || !empty($attendanceEventPhotos)) {
             $sheet->setCellValue("B{$currentRow}", 'LAMPIRAN FOTO NOTA FISIK / STRUK / DOKUMEN PENDUKUNG:');
             $sheet->getStyle("B{$currentRow}")->getFont()->setBold(true)->setSize(10)->getColor()->setRGB('1E293B');
             $currentRow += 2;
 
-            $colPositions = ['B', 'F'];
-            $gIdx = 0;
-            $baseRow = $currentRow;
+            if ($hasAttendance) {
+                // Format: Native participant table in spreadsheet cells, followed immediately by Event Photo (left) and Receipt Photo (right)
+                foreach ($attendanceSheets as $aIdx => $att) {
+                    $sheet->setCellValue("B{$currentRow}", 'DAFTAR HADIR: ' . ($att['purpose'] ?: 'Pertemuan / Jamuan Makan'));
+                    $sheet->getStyle("B{$currentRow}")->getFont()->setBold(true)->setSize(10)->getColor()->setRGB('0F766E');
+                    $currentRow++;
 
-            foreach ($generalPhotos as $gPath) {
-                if (file_exists($gPath)) {
-                    try {
-                        $targetCol = $colPositions[$gIdx % 2];
-                        $sheet->setCellValue("{$targetCol}{$baseRow}", 'Foto Nota / Struk #' . ($gIdx + 1));
-                        $sheet->getStyle("{$targetCol}{$baseRow}")->getFont()->setItalic(true)->setSize(9);
+                    $sheet->setCellValue("B{$currentRow}", "Lokasi: {$att['place']}  |  Tanggal: {$att['date']}" . (!empty($att['notes']) ? "  |  Catatan: {$att['notes']}" : ''));
+                    $sheet->getStyle("B{$currentRow}")->getFont()->setItalic(true)->setSize(9)->getColor()->setRGB('475569');
+                    $currentRow++;
 
-                        $drawingGen = new Drawing();
-                        $drawingGen->setName('Foto Nota ' . ($gIdx + 1));
-                        $drawingGen->setPath($gPath);
-                        $drawingGen->setHeight(190);
-                        $drawingGen->setCoordinates("{$targetCol}" . ($baseRow + 1));
-                        $drawingGen->setWorksheet($sheet);
+                    // Table headers
+                    $pHeaders = ['B' => 'NO', 'C' => 'NAMA PESERTA', 'D' => 'INSTANSI / PERUSAHAAN', 'E' => 'JABATAN', 'F' => 'NO. HP / KONTAK'];
+                    foreach ($pHeaders as $c => $h) {
+                        $sheet->setCellValue("{$c}{$currentRow}", $h);
+                    }
+                    $sheet->getStyle("B{$currentRow}:F{$currentRow}")->applyFromArray([
+                        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 9],
+                        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0F766E']],
+                        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+                    ]);
+                    $sheet->getRowDimension($currentRow)->setRowHeight(20);
+                    $tableStartRow = $currentRow;
+                    $currentRow++;
 
-                        if ($gIdx % 2 === 1) {
-                            $baseRow += 12;
+                    $participants = $att['participants'] ?? [];
+                    if (empty($participants)) {
+                        $sheet->mergeCells("B{$currentRow}:F{$currentRow}");
+                        $sheet->setCellValue("B{$currentRow}", 'Tidak ada data peserta yang dicatat.');
+                        $sheet->getStyle("B{$currentRow}")->getFont()->setItalic(true)->getColor()->setRGB('94A3B8');
+                        $sheet->getStyle("B{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                        $currentRow++;
+                    } else {
+                        foreach ($participants as $pIdx => $p) {
+                            $sheet->setCellValue("B{$currentRow}", $pIdx + 1);
+                            $sheet->setCellValue("C{$currentRow}", $p['name'] ?? '-');
+                            $sheet->setCellValue("D{$currentRow}", $p['institution'] ?? '-');
+                            $sheet->setCellValue("E{$currentRow}", $p['position'] ?? '-');
+                            $sheet->setCellValue("F{$currentRow}", $p['phone'] ?? '-');
+
+                            $sheet->getStyle("B{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                            $sheet->getStyle("F{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+                            if ($pIdx % 2 === 1) {
+                                $sheet->getStyle("B{$currentRow}:F{$currentRow}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+                            }
+                            $currentRow++;
                         }
-                        $gIdx++;
-                    } catch (\Throwable $e) {}
+                    }
+
+                    $tableEndRow = $currentRow - 1;
+                    $sheet->getStyle("B{$tableStartRow}:F{$tableEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('CBD5E1');
+                    $currentRow += 2;
+
+                    // Side-by-side photos directly below Daftar Hadir:
+                    // Left (Col B): Dokumentasi Foto Pertemuan
+                    // Right (Col F): Foto Nota / Struk Fisik
+                    $leftPhoto = $attendanceEventPhotos[$aIdx] ?? ($attendanceEventPhotos[0] ?? null);
+                    $rightPhoto = $generalPhotos[$aIdx] ?? ($generalPhotos[0] ?? null);
+
+                    $hasSidePhotos = false;
+                    if ($leftPhoto && file_exists($leftPhoto)) {
+                        try {
+                            $sheet->setCellValue("B{$currentRow}", 'Dokumentasi Foto Pertemuan & Kegiatan');
+                            $sheet->getStyle("B{$currentRow}")->getFont()->setItalic(true)->setSize(9)->getColor()->setRGB('475569');
+
+                            $drawingLeft = new Drawing();
+                            $drawingLeft->setName('Dokumentasi Pertemuan #' . ($aIdx + 1));
+                            $drawingLeft->setPath($leftPhoto);
+                            $drawingLeft->setHeight(210);
+                            $drawingLeft->setCoordinates("B" . ($currentRow + 1));
+                            $drawingLeft->setWorksheet($sheet);
+                            $hasSidePhotos = true;
+                        } catch (\Throwable $e) {}
+                    }
+
+                    if ($rightPhoto && file_exists($rightPhoto)) {
+                        try {
+                            $sheet->setCellValue("F{$currentRow}", 'Foto Nota Fisik / Struk Pembelian');
+                            $sheet->getStyle("F{$currentRow}")->getFont()->setItalic(true)->setSize(9)->getColor()->setRGB('475569');
+
+                            $drawingRight = new Drawing();
+                            $drawingRight->setName('Foto Nota Fisik #' . ($aIdx + 1));
+                            $drawingRight->setPath($rightPhoto);
+                            $drawingRight->setHeight(210);
+                            $drawingRight->setCoordinates("F" . ($currentRow + 1));
+                            $drawingRight->setWorksheet($sheet);
+                            $hasSidePhotos = true;
+                        } catch (\Throwable $e) {}
+                    }
+
+                    if ($hasSidePhotos) {
+                        $currentRow += 14;
+                    }
                 }
+
+                // Any extra receipts (beyond attendance count)
+                $extraPhotos = array_slice($generalPhotos, count($attendanceSheets));
+                $extraEventPhotos = array_slice($attendanceEventPhotos, count($attendanceSheets));
+                $allExtras = array_merge($extraPhotos, $extraEventPhotos);
+
+                if (!empty($allExtras)) {
+                    $colPositions = ['B', 'F'];
+                    $baseRow = $currentRow;
+                    $exIdx = 0;
+                    foreach ($allExtras as $xPath) {
+                        if (file_exists($xPath)) {
+                            try {
+                                $targetCol = $colPositions[$exIdx % 2];
+                                $sheet->setCellValue("{$targetCol}{$baseRow}", 'Lampiran Pendukung Lainnya #' . ($exIdx + 1));
+                                $sheet->getStyle("{$targetCol}{$baseRow}")->getFont()->setItalic(true)->setSize(9);
+
+                                $drawingExtra = new Drawing();
+                                $drawingExtra->setName('Lampiran ' . ($exIdx + 1));
+                                $drawingExtra->setPath($xPath);
+                                $drawingExtra->setHeight(190);
+                                $drawingExtra->setCoordinates("{$targetCol}" . ($baseRow + 1));
+                                $drawingExtra->setWorksheet($sheet);
+
+                                if ($exIdx % 2 === 1) {
+                                    $baseRow += 12;
+                                }
+                                $exIdx++;
+                            } catch (\Throwable $e) {}
+                        }
+                    }
+                    if ($exIdx % 2 === 1) {
+                        $baseRow += 12;
+                    }
+                    $currentRow = $baseRow + 1;
+                }
+            } else {
+                // Standard non-attendance photos layout
+                $colPositions = ['B', 'F'];
+                $gIdx = 0;
+                $baseRow = $currentRow;
+
+                foreach ($generalPhotos as $gPath) {
+                    if (file_exists($gPath)) {
+                        try {
+                            $targetCol = $colPositions[$gIdx % 2];
+                            $sheet->setCellValue("{$targetCol}{$baseRow}", 'Foto Nota / Struk #' . ($gIdx + 1));
+                            $sheet->getStyle("{$targetCol}{$baseRow}")->getFont()->setItalic(true)->setSize(9);
+
+                            $drawingGen = new Drawing();
+                            $drawingGen->setName('Foto Nota ' . ($gIdx + 1));
+                            $drawingGen->setPath($gPath);
+                            $drawingGen->setHeight(190);
+                            $drawingGen->setCoordinates("{$targetCol}" . ($baseRow + 1));
+                            $drawingGen->setWorksheet($sheet);
+
+                            if ($gIdx % 2 === 1) {
+                                $baseRow += 12;
+                            }
+                            $gIdx++;
+                        } catch (\Throwable $e) {}
+                    }
+                }
+                if ($gIdx % 2 === 1) {
+                    $baseRow += 12;
+                }
+                $currentRow = $baseRow + 1;
             }
-            if ($gIdx % 2 === 1) {
-                $baseRow += 12;
-            }
-            $currentRow = $baseRow + 1;
         }
 
         // SECTION C: BUKTI TRANSFER PENGEMBALIAN DANA (TRANSFER BALIK KE FINANCE)
@@ -3081,6 +3244,187 @@ class ClaimExcelExportService
         }
 
         return $currentRow;
+    }
+
+    /**
+     * Export Single Nota Balik Perdin to Excel (Item 15)
+     */
+    public function exportNotaBalikSingleExcel(Claim $claim)
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Nota Balik Perdin');
+        $sheet->setShowGridLines(true);
+
+        $emp = $claim->effective_employee;
+        $empName = $emp?->name ?? 'Pemohon';
+
+        // Column widths
+        $sheet->getColumnDimension('A')->setWidth(4);
+        $sheet->getColumnDimension('B')->setWidth(6);
+        $sheet->getColumnDimension('C')->setWidth(30);
+        $sheet->getColumnDimension('D')->setWidth(22);
+        $sheet->getColumnDimension('E')->setWidth(22);
+        $sheet->getColumnDimension('F')->setWidth(22);
+        $sheet->getColumnDimension('G')->setWidth(25);
+
+        // Header Title
+        $sheet->setCellValue('B2', strtoupper($claim->badan_usaha ?: 'PT MEDIA SELULAR INDONESIA'));
+        $sheet->getStyle('B2')->getFont()->setBold(true)->setSize(14)->getColor()->setRGB('0F172A');
+
+        $sheet->setCellValue('B3', 'LAPORAN PERTANGGUNGJAWABAN REALISASI BIAYA & NOTA BALIK PERDIN');
+        $sheet->getStyle('B3')->getFont()->setBold(true)->setSize(11)->getColor()->setRGB('047857');
+
+        $uidText = $claim->_uid ?: 'DRAFT';
+        $sheet->setCellValue('B4', "UID Form: {$uidText} | Status Nota Balik: {$claim->nota_balik_status}");
+        $sheet->getStyle('B4')->getFont()->setSize(9)->setItalic(true)->getColor()->setRGB('475569');
+
+        // Info Pemohon
+        $sheet->setCellValue('B6', 'Nama Pemohon:');
+        $sheet->setCellValue('C6', $empName);
+        $sheet->setCellValue('E6', 'Kota Tujuan:');
+        $sheet->setCellValue('F6', strtoupper($claim->destination_city ?: '-'));
+
+        $sheet->setCellValue('B7', 'Jabatan / Posisi:');
+        $sheet->setCellValue('C7', $emp?->position_name ?? 'Sales');
+        $sheet->setCellValue('E7', 'Tanggal Dinas:');
+        $depDate = $claim->claim_date ? $claim->claim_date->format('d/m/Y') : '-';
+        $retDate = $claim->perdin_return_date ? $claim->perdin_return_date->format('d/m/Y') : '-';
+        $sheet->setCellValue('F7', "{$depDate} s/d {$retDate} ({$claim->days_count} Hari)");
+
+        $sheet->setCellValue('B8', 'Agenda / Keperluan:');
+        $sheet->setCellValue('C8', $claim->purpose ?: 'Kunjungan & Operasional Lapangan');
+        $sheet->setCellValue('E8', 'Tanggal Nota Balik:');
+        $sheet->setCellValue('F8', $claim->nota_balik_submitted_at ? $claim->nota_balik_submitted_at->format('d/m/Y H:i') : date('d/m/Y'));
+
+        $sheet->getStyle('B6:B8')->getFont()->setBold(true);
+        $sheet->getStyle('E6:E8')->getFont()->setBold(true);
+
+        // Table Header
+        $headerRow = 10;
+        $headers = [
+            'B' => 'NO',
+            'C' => 'KOMPONEN BIAYA',
+            'D' => 'ESTIMASI AWAL (RP)',
+            'E' => 'REALISASI TERPAKAI (RP)',
+            'F' => 'SISA PENGEMBALIAN (RP)',
+            'G' => 'BUKTI FISIK / STATUS',
+        ];
+
+        foreach ($headers as $col => $title) {
+            $sheet->setCellValue("{$col}{$headerRow}", $title);
+        }
+
+        $sheet->getStyle("B{$headerRow}:G{$headerRow}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 9],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '047857']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getRowDimension($headerRow)->setRowHeight(26);
+
+        // Data Rows Calculation
+        $estMeal = (float)$claim->meal_allowance;
+        $actMeal = (float)($claim->actual_meal_allowance > 0 ? $claim->actual_meal_allowance : $claim->meal_allowance);
+        $remMeal = max(0, $estMeal - $actMeal);
+
+        $estFuel = (float)$claim->fuel_cost;
+        $actFuel = (float)($claim->actual_fuel_cost > 0 ? $claim->actual_fuel_cost : 0);
+        $remFuel = max(0, $estFuel - $actFuel);
+
+        $estToll = (float)$claim->toll_cost;
+        $actToll = (float)($claim->actual_toll_cost > 0 ? $claim->actual_toll_cost : 0);
+        $remToll = max(0, $estToll - $actToll);
+
+        $estRental = (float)$claim->car_rental_cost;
+        $actRental = (float)($claim->actual_car_rental_cost > 0 ? $claim->actual_car_rental_cost : 0);
+        $remRental = max(0, $estRental - $actRental);
+
+        $items = [
+            ['Uang Makan', $estMeal, $actMeal, $remMeal, 'Kwitansi Sistem'],
+            ['Transportasi - BBM', $estFuel, $actFuel, $remFuel, 'Struk SPBU Terlampir'],
+            ['Transportasi - Tiket / Tol', $estToll, $actToll, $remToll, 'Tiket / Karcis Tol'],
+            ['Kompensasi Sewa Kendaraan', $estRental, $actRental, $remRental, 'Nota Sewa Kendaraan'],
+        ];
+
+        $currentRow = $headerRow + 1;
+        $no = 1;
+        foreach ($items as $item) {
+            $sheet->setCellValue("B{$currentRow}", $no++);
+            $sheet->setCellValue("C{$currentRow}", $item[0]);
+            $sheet->setCellValue("D{$currentRow}", $item[1]);
+            $sheet->setCellValue("E{$currentRow}", $item[2]);
+            $sheet->setCellValue("F{$currentRow}", $item[3]);
+            $sheet->setCellValue("G{$currentRow}", $item[4]);
+
+            $sheet->getStyle("B{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("D{$currentRow}:F{$currentRow}")->getNumberFormat()->setFormatCode('"Rp "#,##0');
+            $sheet->getStyle("G{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $currentRow++;
+        }
+
+        // Total Row
+        $sheet->setCellValue("B{$currentRow}", 'TOTAL KESELURUHAN (RP):');
+        $sheet->mergeCells("B{$currentRow}:C{$currentRow}");
+        $sheet->setCellValue("D{$currentRow}", "=SUM(D" . ($headerRow + 1) . ":D" . ($currentRow - 1) . ")");
+        $sheet->setCellValue("E{$currentRow}", "=SUM(E" . ($headerRow + 1) . ":E" . ($currentRow - 1) . ")");
+        $sheet->setCellValue("F{$currentRow}", "=SUM(F" . ($headerRow + 1) . ":F" . ($currentRow - 1) . ")");
+        $sheet->setCellValue("G{$currentRow}", '-');
+
+        $sheet->getStyle("B{$currentRow}:G{$currentRow}")->applyFromArray([
+            'font' => ['bold' => true, 'size' => 10],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'D1FAE5']],
+            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getStyle("D{$currentRow}:F{$currentRow}")->getNumberFormat()->setFormatCode('"Rp "#,##0');
+        $sheet->getStyle("G{$currentRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        // Border
+        $sheet->getStyle("B{$headerRow}:G{$currentRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('94A3B8');
+
+        // Recap Box
+        $currentRow += 2;
+        $sheet->setCellValue("B{$currentRow}", "REKAPITULASI DANA & PENGEMBALIAN SISA DANA:");
+        $sheet->getStyle("B{$currentRow}")->getFont()->setBold(true)->setSize(10)->getColor()->setRGB('0F172A');
+        $currentRow++;
+
+        $totalEst = (float)$claim->amount;
+        $totalAct = (float)($claim->actual_amount_total > 0 ? $claim->actual_amount_total : ($actMeal + $actFuel + $actToll + $actRental));
+        $totalRem = (float)($claim->remaining_amount_calculated > 0 ? $claim->remaining_amount_calculated : max(0, $totalEst - $totalAct));
+
+        $sheet->setCellValue("B{$currentRow}", "Total Uang Muka Dicairkan Finance: Rp " . number_format($totalEst, 0, ',', '.'));
+        $currentRow++;
+        $sheet->setCellValue("B{$currentRow}", "Total Realisasi Biaya Terpakai: Rp " . number_format($totalAct, 0, ',', '.'));
+        $currentRow++;
+        $sheet->setCellValue("B{$currentRow}", "TOTAL SISA DANA WAJIB DIKEMBALIKAN: Rp " . number_format($totalRem, 0, ',', '.'));
+        $sheet->getStyle("B{$currentRow}")->getFont()->setBold(true)->getColor()->setRGB('047857');
+        $currentRow++;
+
+        $statusTransfer = !empty($claim->return_transfer_proof) ? "SUDAH DITRANSFER KE REKENING FINANCE" : ($totalRem <= 0 ? "NIHIL (TERPAKAI SEMUA)" : "BELUM DITRANSFER");
+        $sheet->setCellValue("B{$currentRow}", "Status Pengembalian ke Kas Finance: {$statusTransfer}");
+        $sheet->getStyle("B{$currentRow}")->getFont()->setBold(true);
+
+        // Signatures
+        $currentRow += 3;
+        $sheet->setCellValue("B{$currentRow}", 'Yang Menyerahkan (Pemohon):');
+        $sheet->setCellValue("D{$currentRow}", 'Diverifikasi Admin Region:');
+        $sheet->setCellValue("F{$currentRow}", 'Disetujui Tim Finance:');
+        $sheet->getStyle("B{$currentRow}:F{$currentRow}")->getFont()->setBold(true);
+
+        $currentRow += 4;
+        $sheet->setCellValue("B{$currentRow}", "( {$empName} )");
+        $sheet->setCellValue("D{$currentRow}", "( " . ($claim->adminApprovedBy?->name ?? 'Admin Region') . " )");
+        $sheet->setCellValue("F{$currentRow}", "( " . ($claim->financeApprovedBy?->name ?? 'Tim Finance') . " )");
+        $sheet->getStyle("B{$currentRow}:F{$currentRow}")->getFont()->setBold(true);
+
+        $cleanName = preg_replace('/[^A-Za-z0-9_\-]/', '_', $empName);
+        $fileName = "Nota_Balik_{$cleanName}_{$uidText}_" . date('Ymd_His') . ".xlsx";
+        $tempPath = tempnam(sys_get_temp_dir(), 'nota_balik_') . '.xlsx';
+        $writer = new Xlsx($spreadsheet);
+        $writer->save($tempPath);
+
+        return response()->download($tempPath, $fileName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
     }
 }
 

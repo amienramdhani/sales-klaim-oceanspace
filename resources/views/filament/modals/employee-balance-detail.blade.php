@@ -62,7 +62,7 @@
             <div class="flex items-center justify-between mb-2">
                 <span class="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
                     <span class="w-2.5 h-2.5 rounded-full {{ $bbmIsOver ? 'bg-red-500 animate-pulse' : 'bg-blue-500' }}"></span>
-                    Klaim BBM (Bahan Bakar)
+                    Nota Balik BBM (Bahan Bakar)
                 </span>
                 @if($bbmIsOver)
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300">

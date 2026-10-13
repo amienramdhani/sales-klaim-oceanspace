@@ -9,7 +9,7 @@
                 </div>
                 <div>
                     <h3 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <span>Alur Nota Balik Klaim BBM</span>
+                        <span>Alur Nota Balik BBM</span>
                         @if(now()->day <= 10)
                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
                                 Periode Aktif s/d Tanggal 10

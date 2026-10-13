@@ -296,7 +296,7 @@ class BbmClaimWordExportService
         }
 
         $cleanName = preg_replace('/[^A-Za-z0-9_\-]/', '_', $empName);
-        $fileName = "Form_Klaim_BBM_{$cleanName}_" . date('Ymd_His') . ".docx";
+        $fileName = "Form_Nota_Balik_BBM_{$cleanName}_" . date('Ymd_His') . ".docx";
         $tempPath = storage_path("app/public/{$fileName}");
 
         $writer = \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007');

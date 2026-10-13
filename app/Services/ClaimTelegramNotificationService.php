@@ -45,14 +45,31 @@ class ClaimTelegramNotificationService
                         $this->notifyRgmApproved($claim);
                         break;
 
-                    case 'jejen_approved':
-                    case 'ACC_PAK_JEJEN':
-                        $this->notifyJejenApproved($claim);
+                    case 'admin_approved':
+                    case 'ACC_ADMIN':
+                        $this->notifyAdminApproved($claim);
                         break;
 
-                    case 'admin_approved':
+                    case 'waiting_yoga':
+                    case 'WAITING_YOGA':
+                        $this->notifyWaitingYoga($claim);
+                        break;
+
+                    case 'waiting_thia':
+                    case 'WAITING_THIA':
+                        $this->notifyWaitingThia($claim);
+                        break;
+
+                    case 'waiting_nurbaiti':
+                    case 'WAITING_NURBAITI':
+                        $this->notifyWaitingNurbaiti($claim);
+                        break;
+
+                    case 'approved_for_disbursement':
+                    case 'jejen_approved':
                     case 'DISETUJUI':
-                        $this->notifyAdminApproved($claim);
+                    case 'ACC_PAK_JEJEN':
+                        $this->notifyApprovedForDisbursement($claim);
                         break;
 
                     case 'rejected':
@@ -79,7 +96,7 @@ class ClaimTelegramNotificationService
      * Mengikuti hierarki jabatan pemohon:
      * - Sales -> Kirim ke ASM
      * - ASM -> Kirim ke RGM
-     * - RGM -> Kirim ke Pak Jejen
+     * - RGM -> Kirim ke Admin untuk verifikasi
      */
     public function notifyNewClaim(Claim $claim): void
     {
@@ -90,10 +107,10 @@ class ClaimTelegramNotificationService
         $isApplicantAsm = !$isApplicantRgm && ($applicantEmp?->isAsm() || $applicantUser?->isAsm());
 
         if ($isApplicantRgm) {
-            // Pemohon adalah RGM -> Kirim langsung ke Head of Sales (Pak Jejen)
-            $recipients = $this->getJejenChatIds();
-            $targetRole = 'Head of Sales (Pak Jejen)';
-            $routeUrl = $this->getApprovalUrl('filament.admin.resources.jejen-claim-approvals.index');
+            // Pemohon adalah RGM -> Kirim ke Admin untuk verifikasi
+            $recipients = $this->getAdminChatIds($claim);
+            $targetRole = 'Admin';
+            $routeUrl = $this->getApprovalUrl('filament.admin.resources.admin-claim-approvals.index');
         } elseif ($isApplicantAsm) {
             // Pemohon adalah ASM -> Kirim langsung ke RGM
             $recipients = $this->getRgmChatIds($claim);
@@ -134,26 +151,9 @@ class ClaimTelegramNotificationService
     }
 
     /**
-     * 3. Notifikasi: RGM Telah Menyetujui -> Kirim ke Head of Sales (Pak Jejen)
+     * 3. Notifikasi: RGM Telah Menyetujui -> Kirim ke Admin
      */
     public function notifyRgmApproved(Claim $claim): void
-    {
-        $recipients = $this->getJejenChatIds();
-        if (empty($recipients)) {
-            Log::info("ClaimTelegramNotificationService: Tidak ada Chat ID Pak Jejen untuk klaim #{$claim->id}.");
-            return;
-        }
-
-        $routeUrl = $this->getApprovalUrl('filament.admin.resources.jejen-claim-approvals.index');
-        $html = $this->formatApprovalNotificationMessage($claim, $routeUrl);
-        $buttons = $this->createButton('🔍 Buka Persetujuan Pak Jejen', $routeUrl);
-        $this->telegram->sendToMultiple($recipients, $html, $buttons);
-    }
-
-    /**
-     * 4. Notifikasi: Pak Jejen Telah Menyetujui -> Kirim ke Admin
-     */
-    public function notifyJejenApproved(Claim $claim): void
     {
         $recipients = $this->getAdminChatIds($claim);
         if (empty($recipients)) {
@@ -168,11 +168,79 @@ class ClaimTelegramNotificationService
     }
 
     /**
-     * 5. Notifikasi: Admin Telah Menyetujui -> Kirim ke Finance
+     * 4. Notifikasi: Admin Telah Memverifikasi -> Kirim ke Head of Sales (Pak Jejen)
      */
     public function notifyAdminApproved(Claim $claim): void
     {
-        $recipients = $this->getFinanceChatIds();
+        $recipients = $this->getJejenChatIds();
+        if (empty($recipients)) {
+            Log::info("ClaimTelegramNotificationService: Tidak ada Chat ID Pak Jejen untuk klaim #{$claim->id}.");
+            return;
+        }
+
+        $routeUrl = $this->getApprovalUrl('filament.admin.resources.jejen-claim-approvals.index');
+        $html = $this->formatApprovalNotificationMessage($claim, $routeUrl);
+        $buttons = $this->createButton('🔍 Buka Persetujuan Pak Jejen', $routeUrl);
+        $this->telegram->sendToMultiple($recipients, $html, $buttons);
+    }
+
+    /**
+     * 5.A Notifikasi: Menunggu Approval Manager Finance (Pak Yoga P. Hadi) - PT Media Selular Indonesia
+     */
+    public function notifyWaitingYoga(Claim $claim): void
+    {
+        $recipients = $this->getYogaChatIds();
+        if (empty($recipients)) {
+            Log::info("ClaimTelegramNotificationService: Tidak ada Chat ID Pak Yoga untuk klaim #{$claim->id}.");
+            return;
+        }
+
+        $routeUrl = $this->getApprovalUrl('filament.admin.resources.yoga-claim-approvals.index');
+        $html = $this->formatApprovalNotificationMessage($claim, $routeUrl);
+        $buttons = $this->createButton('🔍 Buka Persetujuan Manager Finance', $routeUrl);
+        $this->telegram->sendToMultiple($recipients, $html, $buttons);
+    }
+
+    /**
+     * 5.B Notifikasi: Menunggu Approval Manajer Keuangan (Thia Aisyah) - CV Top Selular
+     */
+    public function notifyWaitingThia(Claim $claim): void
+    {
+        $recipients = $this->getThiaChatIds();
+        if (empty($recipients)) {
+            Log::info("ClaimTelegramNotificationService: Tidak ada Chat ID Bu Thia untuk klaim #{$claim->id}.");
+            return;
+        }
+
+        $routeUrl = $this->getApprovalUrl('filament.admin.resources.thia-claim-approvals.index');
+        $html = $this->formatApprovalNotificationMessage($claim, $routeUrl);
+        $buttons = $this->createButton('🔍 Buka Persetujuan Manajer Keuangan', $routeUrl);
+        $this->telegram->sendToMultiple($recipients, $html, $buttons);
+    }
+
+    /**
+     * 5.C Notifikasi: Menunggu Approval Finance Coordinator (Bu Nurbaeti Riaseha) - PT Media Selular Indonesia
+     */
+    public function notifyWaitingNurbaiti(Claim $claim): void
+    {
+        $recipients = $this->getNurbaitiChatIds();
+        if (empty($recipients)) {
+            Log::info("ClaimTelegramNotificationService: Tidak ada Chat ID Bu Nurbaeti untuk klaim #{$claim->id}.");
+            return;
+        }
+
+        $routeUrl = $this->getApprovalUrl('filament.admin.resources.nurbaiti-claim-approvals.index');
+        $html = $this->formatApprovalNotificationMessage($claim, $routeUrl);
+        $buttons = $this->createButton('🔍 Buka Persetujuan Finance Coordinator', $routeUrl);
+        $this->telegram->sendToMultiple($recipients, $html, $buttons);
+    }
+
+    /**
+     * 5.D Notifikasi: Klaim Disetujui Penuh -> Masuk Antrean Pencairan Finance Sesuai Badan Usaha
+     */
+    public function notifyApprovedForDisbursement(Claim $claim): void
+    {
+        $recipients = $this->getFinanceChatIds($claim);
         if (empty($recipients)) {
             Log::info("ClaimTelegramNotificationService: Tidak ada Chat ID Finance untuk klaim #{$claim->id}.");
             return;
@@ -186,6 +254,11 @@ class ClaimTelegramNotificationService
         $html = $this->formatApprovalNotificationMessage($claim, $routeUrl);
         $buttons = $this->createButton('💸 Buka Menu Finance', $routeUrl);
         $this->telegram->sendToMultiple($recipients, $html, $buttons);
+    }
+
+    public function notifyJejenApproved(Claim $claim): void
+    {
+        $this->notifyApprovedForDisbursement($claim);
     }
 
     /**
@@ -510,19 +583,84 @@ class ClaimTelegramNotificationService
         return array_values(array_unique(array_filter($chatIds)));
     }
 
+    public function getYogaChatIds(): array
+    {
+        $chatIds = [];
+        $users = User::whereNotNull('telegram_chat_id')
+            ->where('telegram_chat_id', '!=', '')
+            ->get()
+            ->filter(fn (User $u) => $u->isYoga());
+        foreach ($users as $u) {
+            $chatIds[] = $u->telegram_chat_id;
+        }
+        $fallback = config('services.telegram.channel_finance') ?: config('services.telegram.channel_default');
+        if (!empty($fallback)) {
+            $chatIds[] = $fallback;
+        }
+        return array_values(array_unique(array_filter($chatIds)));
+    }
+
+    public function getNurbaitiChatIds(): array
+    {
+        $chatIds = [];
+        $users = User::whereNotNull('telegram_chat_id')
+            ->where('telegram_chat_id', '!=', '')
+            ->get()
+            ->filter(fn (User $u) => $u->isNurbaiti());
+        foreach ($users as $u) {
+            $chatIds[] = $u->telegram_chat_id;
+        }
+        $fallback = config('services.telegram.channel_finance') ?: config('services.telegram.channel_default');
+        if (!empty($fallback)) {
+            $chatIds[] = $fallback;
+        }
+        return array_values(array_unique(array_filter($chatIds)));
+    }
+
+    public function getThiaChatIds(): array
+    {
+        $chatIds = [];
+        $users = User::whereNotNull('telegram_chat_id')
+            ->where('telegram_chat_id', '!=', '')
+            ->get()
+            ->filter(fn (User $u) => $u->isThia());
+        foreach ($users as $u) {
+            $chatIds[] = $u->telegram_chat_id;
+        }
+        $fallback = config('services.telegram.channel_finance') ?: config('services.telegram.channel_default');
+        if (!empty($fallback)) {
+            $chatIds[] = $fallback;
+        }
+        return array_values(array_unique(array_filter($chatIds)));
+    }
+
     /**
-     * Dapatkan Chat ID untuk Finance:
-     * 1. User role FINANCE yang memiliki telegram_chat_id
+     * Dapatkan Chat ID untuk Finance (dipisahkan berdasarkan Badan Usaha):
+     * 1. User role FINANCE yang memiliki telegram_chat_id dan sesuai Badan Usaha
      * 2. Fallback: TELEGRAM_FINANCE_CHAT_ID atau TELEGRAM_DEFAULT_CHAT_ID
      */
-    public function getFinanceChatIds(): array
+    public function getFinanceChatIds(?Claim $claim = null): array
     {
         $chatIds = [];
 
         $financeUsers = User::whereNotNull('telegram_chat_id')
             ->where('telegram_chat_id', '!=', '')
             ->get()
-            ->filter(fn (User $u) => $u->isFinance());
+            ->filter(function (User $u) use ($claim) {
+                if (!$u->isFinance()) return false;
+                if (!$claim) return true;
+                if ($claim->isTopSelular()) {
+                    return $u->isFinanceTop() || $u->isFinanceCvcs();
+                }
+                return $u->isFinanceMsi() || !$u->isFinanceTop();
+            });
+
+        if ($financeUsers->isEmpty()) {
+            $financeUsers = User::whereNotNull('telegram_chat_id')
+                ->where('telegram_chat_id', '!=', '')
+                ->get()
+                ->filter(fn (User $u) => $u->isFinance());
+        }
 
         foreach ($financeUsers as $u) {
             $chatIds[] = $u->telegram_chat_id;

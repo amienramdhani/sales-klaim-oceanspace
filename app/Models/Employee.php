@@ -24,6 +24,7 @@ class Employee extends Model
         'email',
         'homebase',
         'region',
+        'region_id',
         'bank_name',
         'bank_account_number',
         'bank_account_name',
@@ -33,8 +34,10 @@ class Employee extends Model
         'perdin_meal_allowance',
         'perdin_lodging_allowance',
         'perdin_transport_budget',
-        'transport_budget',
         'signature_image',
+        'managed_branches',
+        'company',
+        'badan_usaha',
         'status',
     ];
 
@@ -46,17 +49,108 @@ class Employee extends Model
         'perdin_lodging_allowance' => 'decimal:2',
         'perdin_transport_budget' => 'decimal:2',
         'transport_budget' => 'decimal:2',
+        'managed_branches' => 'array',
     ];
 
     protected static function booted(): void
     {
         static::saving(function (Employee $employee) {
+            if ($employee->region_id) {
+                $reg = Region::find($employee->region_id);
+                if ($reg) {
+                    $employee->region = $reg->name;
+                }
+            } elseif (!empty($employee->region)) {
+                $reg = Region::where('name', strtoupper(trim($employee->region)))->first();
+                if ($reg) {
+                    $employee->region_id = $reg->id;
+                }
+            }
+            if (!$employee->isAsm() && !$employee->isRgm()) {
+                $employee->bbm_budget = 0;
+                $employee->entertain_budget = 0;
+            }
             if (is_null($employee->bbm_budget)) $employee->bbm_budget = 0;
+            if (is_null($employee->entertain_budget)) $employee->entertain_budget = 0;
             if (is_null($employee->perdin_budget)) $employee->perdin_budget = 0;
             if (is_null($employee->transport_budget)) $employee->transport_budget = 0;
             if (is_null($employee->perdin_meal_allowance)) $employee->perdin_meal_allowance = 100000;
             if (is_null($employee->perdin_lodging_allowance)) $employee->perdin_lodging_allowance = 250000;
             if (is_null($employee->perdin_transport_budget)) $employee->perdin_transport_budget = 500000;
+        });
+
+        static::saved(function (Employee $employee) {
+            $nik = trim($employee->custom_id ?? '');
+            if (empty($nik)) {
+                return;
+            }
+
+            // Cari user yang sudah terhubung lewat employee_id atau custom_id (NIK)
+            $user = User::where('employee_id', $employee->id)
+                ->orWhere('custom_id', $nik)
+                ->first();
+
+            $email = $employee->email;
+            if (empty($email)) {
+                $slug = \Illuminate\Support\Str::slug($employee->name, '.');
+                $email = "{$slug}@msi.co.id";
+            }
+
+            if (!$user) {
+                $pin = str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+
+                // Pastikan email unik
+                $baseEmail = $email;
+                $counter = 1;
+                while (User::where('email', $email)->exists()) {
+                    $parts = explode('@', $baseEmail);
+                    $email = $parts[0] . $counter . '@' . ($parts[1] ?? 'msi.co.id');
+                    $counter++;
+                }
+
+                User::create([
+                    'name' => $employee->name,
+                    'custom_id' => $nik,
+                    'email' => $email,
+                    'password' => \Illuminate\Support\Facades\Hash::make($pin),
+                    'must_change_pin' => true,
+                    'initial_pin' => $pin,
+                    'employee_id' => $employee->id,
+                    'role_id' => $employee->role_id,
+                    'homebase' => $employee->homebase,
+                    'region' => $employee->region,
+                    'managed_branches' => $employee->getManagedBranchesList(),
+                    'company' => $employee->company,
+                    'badan_usaha' => $employee->badan_usaha,
+                ]);
+            } else {
+                $userUpdates = [
+                    'employee_id' => $employee->id,
+                    'name' => $employee->name,
+                    'custom_id' => $nik,
+                ];
+                if ($employee->role_id) {
+                    $userUpdates['role_id'] = $employee->role_id;
+                }
+                if ($employee->region) {
+                    $userUpdates['region'] = $employee->region;
+                }
+                if ($employee->homebase) {
+                    $userUpdates['homebase'] = $employee->homebase;
+                }
+                if ($employee->email && $user->email !== $employee->email) {
+                    if (!User::where('email', $employee->email)->where('id', '!=', $user->id)->exists()) {
+                        $userUpdates['email'] = $employee->email;
+                    }
+                }
+                if ($employee->badan_usaha) {
+                    $userUpdates['badan_usaha'] = $employee->badan_usaha;
+                }
+                if ($employee->company) {
+                    $userUpdates['company'] = $employee->company;
+                }
+                $user->updateQuietly($userUpdates);
+            }
         });
 
         static::deleting(function (Employee $employee) {
@@ -68,17 +162,21 @@ class Employee extends Model
 
     public function isAsm(): bool
     {
-        $roleName = strtoupper($this->role?->name ?? '');
-        $roleCode = strtoupper($this->role?->code ?? '');
-        $posName = strtoupper($this->position_name ?? ($this->position ?? ''));
+        $role = $this->role ?? ($this->role_id ? Role::find($this->role_id) : null);
+        $roleName = strtoupper($role?->name ?? '');
+        $roleCode = strtoupper($role?->code ?? '');
+        $pos = $this->positionModel ?? ($this->position_id ? Position::find($this->position_id) : null);
+        $posName = strtoupper($pos?->name ?? ($this->position_name ?? ($this->position ?? '')));
         return str_contains($roleName, 'ASM') || str_contains($roleCode, 'ASM') || str_contains($posName, 'ASM') || str_contains($posName, 'AREA SALES');
     }
 
     public function isRgm(): bool
     {
-        $roleName = strtoupper($this->role?->name ?? '');
-        $roleCode = strtoupper($this->role?->code ?? '');
-        $posName = strtoupper($this->position_name ?? ($this->position ?? ''));
+        $role = $this->role ?? ($this->role_id ? Role::find($this->role_id) : null);
+        $roleName = strtoupper($role?->name ?? '');
+        $roleCode = strtoupper($role?->code ?? '');
+        $pos = $this->positionModel ?? ($this->position_id ? Position::find($this->position_id) : null);
+        $posName = strtoupper($pos?->name ?? ($this->position_name ?? ($this->position ?? '')));
         return str_contains($roleName, 'RGM') || str_contains($roleCode, 'RGM') || str_contains($posName, 'RGM') || str_contains($posName, 'REGIONAL GENERAL');
     }
 
@@ -98,6 +196,22 @@ class Employee extends Model
                str_contains($roleName, 'SALES');
     }
 
+    public function getManagedBranchesList(): array
+    {
+        $branches = $this->managed_branches;
+        if (is_array($branches)) {
+            return array_map('strval', $branches);
+        }
+        if (is_string($branches)) {
+            $decoded = json_decode($branches, true);
+            if (is_array($decoded)) {
+                return array_map('strval', $decoded);
+            }
+            return array_filter(array_map('trim', explode(',', $branches)));
+        }
+        return [];
+    }
+
     public function positionModel(): BelongsTo
     {
         return $this->belongsTo(Position::class, 'position_id');
@@ -106,6 +220,11 @@ class Employee extends Model
     public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);
+    }
+
+    public function regionModel(): BelongsTo
+    {
+        return $this->belongsTo(Region::class, 'region_id');
     }
 
     public function user(): HasOne
@@ -223,25 +342,11 @@ class Employee extends Model
     }
 
     /**
-     * Get Transport/Tol/Parkir budget (diatur per karyawan, fallback ke standar)
+     * Get Transport/Tol/Parkir budget: TIDAK ADA LIMIT (0.0 = Bebas/Tanpa Batasan Limit)
      */
     public function getTransportBudgetAttribute(): float
     {
-        if (isset($this->attributes['transport_budget']) && (float)$this->attributes['transport_budget'] > 0) {
-            return (float)$this->attributes['transport_budget'];
-        }
-        if ($this->positionModel && (float)$this->positionModel->transport_budget > 0) {
-            return (float)$this->positionModel->transport_budget;
-        }
-        if ($this->role && isset($this->role->transport_budget) && (float)$this->role->transport_budget > 0) {
-            return (float)$this->role->transport_budget;
-        }
-        $roleCode = strtoupper($this->role?->code ?? '');
-        return match (true) {
-            str_contains($roleCode, 'RGM') => 2400000.0,
-            str_contains($roleCode, 'ASM') => 1500000.0,
-            default => 0.0,
-        };
+        return 0.0;
     }
 
     protected array $periodUsageCache = [];
@@ -375,7 +480,7 @@ class Employee extends Model
                 $type = is_array($item['claim_type'] ?? null) ? implode(', ', $item['claim_type']) : ($item['claim_type'] ?? '');
                 $subtype = $item['entertain_subtype'] ?? ($claim->entertain_subtype ?? 'Makan');
                 if (str_contains(strtoupper($type), 'ENTERTAIN') || str_contains(strtoupper($type), 'MAKAN')) {
-                    if (!$onlyMakan || strtoupper($subtype) !== 'LAINNYA') {
+                    if (!$onlyMakan || strtoupper($subtype) === 'MAKAN') {
                         $used += (float)($item['amount'] ?? 0);
                     }
                 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-    <title>Formulir Klaim BBM - {{ $claim->_uid ?: ($employee->name ?? 'MSI') }}</title>
+    <title>Formulir Nota Balik BBM - {{ $claim->_uid ?: ($employee->name ?? 'MSI') }}</title>
     <style>
         @page {
             margin: 20px 25px 25px 25px;
@@ -138,14 +138,14 @@
                 <div class="company-subtitle">Jl. Tuparev No. 109F Kertawinangun, Kedawung - Cirebon 45153</div>
             </td>
             <td style="width: 30%; text-align: right; vertical-align: middle;">
-                <div style="font-size: 9.5px; font-weight: bold; color: #0f766e;">FORMULIR KLAIM BBM</div>
+                <div style="font-size: 9.5px; font-weight: bold; color: #0f766e;">FORMULIR NOTA BALIK BBM</div>
                 <div style="font-size: 8px; color: #475569;">No. UID: <strong style="font-family: monospace; font-size: 9px; color: #0f172a;">{{ $claim->_uid ?: 'DRAFT' }}</strong></div>
                 <div style="font-size: 7.5px; color: #64748b;">Dicetak: {{ date('d/m/Y H:i') }} WIB</div>
             </td>
         </tr>
     </table>
 
-    <div class="voucher-title">FORMULIR PENGAJUAN & REALISASI KLAIM BAHAN BAKAR MINYAK (BBM)</div>
+    <div class="voucher-title">FORMULIR PENGAJUAN & REALISASI NOTA BALIK BAHAN BAKAR MINYAK (BBM)</div>
     <div class="voucher-subtitle">
         Tanggal Pengajuan: {{ $claim->claim_date ? $claim->claim_date->format('d F Y') : '-' }} | 
         Wilayah / Homebase: {{ $claim->region ?: ($employee->region ?? ($employee->homebase ?? '-')) }}
@@ -269,7 +269,7 @@
                     </tr>
                 @endforeach
                 <tr class="total-row">
-                    <td colspan="5" class="text-right" style="padding-right: 8px;">TOTAL KLAIM BBM :</td>
+                    <td colspan="5" class="text-right" style="padding-right: 8px;">TOTAL NOTA BALIK BBM :</td>
                     <td class="text-right">{{ number_format($totalBase, 0, ',', '.') }}</td>
                     <td class="text-right">{{ number_format($totalExtra, 0, ',', '.') }}</td>
                     <td class="text-right" style="color: #0f766e; font-size: 9px;">
@@ -291,7 +291,7 @@
                     <td class="text-right" style="font-weight: bold;">{{ number_format((float)$claim->amount, 0, ',', '.') }}</td>
                 </tr>
                 <tr class="total-row">
-                    <td colspan="5" class="text-right" style="padding-right: 8px;">TOTAL KLAIM BBM :</td>
+                    <td colspan="5" class="text-right" style="padding-right: 8px;">TOTAL NOTA BALIK BBM :</td>
                     <td class="text-right">{{ number_format((float)($claim->fuel_base_amount ?: $claim->amount), 0, ',', '.') }}</td>
                     <td class="text-right">{{ number_format((float)($claim->fuel_extra_amount ?? 0), 0, ',', '.') }}</td>
                     <td class="text-right" style="color: #0f766e; font-size: 9px;">
@@ -304,58 +304,123 @@
 
 
 
-    <!-- LAMPIRAN FOTO BBM (GABUNGAN BEFORE ODOMETER & AFTER NOTA SPBU) -->
+    <!-- LAMPIRAN FOTO BBM (BEFORE ODOMETER & AFTER NOTA SPBU) -->
     @if(!empty($pairs) && count($pairs) > 0)
         <div style="page-break-before: always;"></div>
         <table class="header-table">
             <tr>
                 <td style="width: 70%;">
                     <div class="company-title">PT. MEDIA SELULAR INDONESIA</div>
-                    <div style="font-size: 8px; color: #475569;">Lampiran Bukti Foto BBM - No. UID: {{ $claim->_uid ?: 'DRAFT' }}</div>
+                    <div style="font-size: 8px; color: #475569;">Lampiran Bukti Foto Nota Balik BBM - No. UID: {{ $claim->_uid ?: 'DRAFT' }}</div>
                 </td>
                 <td style="width: 30%; text-align: right;">
-                    <div style="font-size: 8.5px; font-weight: bold; color: #0f766e;">BUKTI FOTO BBM</div>
+                    <div style="font-size: 8.5px; font-weight: bold; color: #0f766e;">BUKTI FOTO BEFORE & AFTER NOTA BALIK BBM</div>
                     <div style="font-size: 7.5px; color: #64748b;">Pemohon: {{ $employee->name ?? '-' }}</div>
                 </td>
             </tr>
         </table>
 
         <div style="font-weight: bold; font-size: 10px; color: #1e293b; margin-bottom: 8px;">
-            DOKUMENTASI FOTO GABUNGAN BBM (ODOMETER & STRUK SPBU) :
+            DOKUMENTASI FOTO BEFORE & AFTER TRANSAKSI PENGISIAN BBM :
         </div>
 
         @foreach($pairs as $p)
-            <div class="photo-card">
-                <div style="font-size: 8.5px; font-weight: bold; color: #0f172a; margin-bottom: 4px;">
+            <div class="photo-card" style="margin-bottom: 14px; page-break-inside: avoid;">
+                <div style="font-size: 8.5px; font-weight: bold; color: #0f172a; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #e2e8f0; text-align: left;">
                     {{ $p['label'] }} | SPBU: {{ $p['spbu'] }} | Tanggal: {{ $p['date'] }} | Nominal: Rp {{ number_format($p['amount'], 0, ',', '.') }}
+                    @if(!empty($p['km'])) | KM: {{ number_format($p['km'], 0, ',', '.') }} @endif
                 </div>
 
-                @if(!empty($p['combined_b64']))
-                    <img src="{{ $p['combined_b64'] }}" class="photo-img" style="max-height: 380px;" alt="Foto Gabungan BBM">
-                @else
+                @if(!empty($p['before_b64']) || !empty($p['after_b64']))
                     <table style="width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="width: 50%; padding: 4px; text-align: center;">
-                                <div style="font-size: 7.5px; font-weight: bold; color: #475569; margin-bottom: 2px;">BEFORE: FOTO KM ODOMETER</div>
-                                @if(!empty($p['before_b64']))
-                                    <img src="{{ $p['before_b64'] }}" class="photo-img" style="max-height: 250px;" alt="Foto Odometer">
-                                @else
-                                    <div style="padding: 20px; color: #94a3b8; font-style: italic;">(Tidak ada foto Odometer)</div>
-                                @endif
+                            <td style="width: 50%; padding: 4px; text-align: center; vertical-align: top;">
+                                <div style="border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; padding: 4px;">
+                                    <div style="font-size: 8px; font-weight: bold; color: #0f766e; background: #f0fdfa; border: 1px solid #ccfbf1; padding: 3px; border-radius: 3px; margin-bottom: 4px;">
+                                        FOTO SEBELUM (BEFORE) - KM ODOMETER
+                                    </div>
+                                    @if(!empty($p['before_b64']))
+                                        <img src="{{ $p['before_b64'] }}" class="photo-img" style="max-height: 250px; max-width: 100%; object-fit: contain;" alt="Foto KM Odometer Sebelum">
+                                    @else
+                                        <div style="padding: 30px 10px; color: #94a3b8; font-size: 8px; font-style: italic;">(Tidak ada foto Odometer Sebelum)</div>
+                                    @endif
+                                    <div style="font-size: 7px; color: #64748b; margin-top: 3px;">Foto KM Odometer Sebelum Isi BBM</div>
+                                </div>
                             </td>
-                            <td style="width: 50%; padding: 4px; text-align: center;">
-                                <div style="font-size: 7.5px; font-weight: bold; color: #475569; margin-bottom: 2px;">AFTER: FOTO STRUK / NOTA SPBU</div>
-                                @if(!empty($p['after_b64']))
-                                    <img src="{{ $p['after_b64'] }}" class="photo-img" style="max-height: 250px;" alt="Foto Struk SPBU">
-                                @else
-                                    <div style="padding: 20px; color: #94a3b8; font-style: italic;">(Tidak ada foto Struk SPBU)</div>
-                                @endif
+                            <td style="width: 50%; padding: 4px; text-align: center; vertical-align: top;">
+                                <div style="border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; padding: 4px;">
+                                    <div style="font-size: 8px; font-weight: bold; color: #0284c7; background: #f0f9ff; border: 1px solid #e0f2fe; padding: 3px; border-radius: 3px; margin-bottom: 4px;">
+                                        FOTO SESUDAH (AFTER) - STRUK / NOTA SPBU
+                                    </div>
+                                    @if(!empty($p['after_b64']))
+                                        <img src="{{ $p['after_b64'] }}" class="photo-img" style="max-height: 250px; max-width: 100%; object-fit: contain;" alt="Foto Struk / Nota SPBU">
+                                    @else
+                                        <div style="padding: 30px 10px; color: #94a3b8; font-size: 8px; font-style: italic;">(Tidak ada foto Struk / Nota SPBU)</div>
+                                    @endif
+                                    <div style="font-size: 7px; color: #64748b; margin-top: 3px;">Bukti Fisik Struk / Nota Pembelian SPBU</div>
+                                </div>
                             </td>
                         </tr>
                     </table>
+                @elseif(!empty($p['combined_b64']))
+                    <div style="text-align: center; padding: 4px;">
+                        <div style="font-size: 8px; font-weight: bold; color: #0f766e; margin-bottom: 4px;">FOTO GABUNGAN BEFORE & AFTER (ODOMETER & STRUK SPBU)</div>
+                        <img src="{{ $p['combined_b64'] }}" class="photo-img" style="max-height: 380px; max-width: 100%;" alt="Foto Gabungan BBM">
+                    </div>
                 @endif
             </div>
         @endforeach
+    @elseif(!empty($claimPhotoBeforeBase64) || !empty($claimPhotoAfterBase64))
+        <div style="page-break-before: always;"></div>
+        <table class="header-table">
+            <tr>
+                <td style="width: 70%;">
+                    <div class="company-title">PT. MEDIA SELULAR INDONESIA</div>
+                    <div style="font-size: 8px; color: #475569;">Lampiran Bukti Foto Nota Balik BBM - No. UID: {{ $claim->_uid ?: 'DRAFT' }}</div>
+                </td>
+                <td style="width: 30%; text-align: right;">
+                    <div style="font-size: 8.5px; font-weight: bold; color: #0f766e;">BUKTI FOTO BEFORE & AFTER NOTA BALIK BBM</div>
+                    <div style="font-size: 7.5px; color: #64748b;">Pemohon: {{ $employee->name ?? '-' }}</div>
+                </td>
+            </tr>
+        </table>
+
+        <div style="font-weight: bold; font-size: 10px; color: #1e293b; margin-bottom: 8px;">
+            DOKUMENTASI FOTO BEFORE & AFTER TRANSAKSI PENGISIAN BBM :
+        </div>
+
+        <div class="photo-card" style="margin-bottom: 14px; page-break-inside: avoid;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="width: 50%; padding: 4px; text-align: center; vertical-align: top;">
+                        <div style="border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; padding: 4px;">
+                            <div style="font-size: 8px; font-weight: bold; color: #0f766e; background: #f0fdfa; border: 1px solid #ccfbf1; padding: 3px; border-radius: 3px; margin-bottom: 4px;">
+                                FOTO SEBELUM (BEFORE) - KM ODOMETER
+                            </div>
+                            @if(!empty($claimPhotoBeforeBase64))
+                                <img src="{{ $claimPhotoBeforeBase64 }}" class="photo-img" style="max-height: 250px; max-width: 100%; object-fit: contain;" alt="Foto KM Odometer Sebelum">
+                            @else
+                                <div style="padding: 30px 10px; color: #94a3b8; font-size: 8px; font-style: italic;">(Tidak ada foto Odometer Sebelum)</div>
+                            @endif
+                            <div style="font-size: 7px; color: #64748b; margin-top: 3px;">Foto KM Odometer Sebelum Isi BBM</div>
+                        </div>
+                    </td>
+                    <td style="width: 50%; padding: 4px; text-align: center; vertical-align: top;">
+                        <div style="border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; padding: 4px;">
+                            <div style="font-size: 8px; font-weight: bold; color: #0284c7; background: #f0f9ff; border: 1px solid #e0f2fe; padding: 3px; border-radius: 3px; margin-bottom: 4px;">
+                                FOTO SESUDAH (AFTER) - STRUK / NOTA SPBU
+                            </div>
+                            @if(!empty($claimPhotoAfterBase64))
+                                <img src="{{ $claimPhotoAfterBase64 }}" class="photo-img" style="max-height: 250px; max-width: 100%; object-fit: contain;" alt="Foto Struk / Nota SPBU">
+                            @else
+                                <div style="padding: 30px 10px; color: #94a3b8; font-size: 8px; font-style: italic;">(Tidak ada foto Struk / Nota SPBU)</div>
+                            @endif
+                            <div style="font-size: 7px; color: #64748b; margin-top: 3px;">Bukti Fisik Struk / Nota Pembelian SPBU</div>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
     @endif
 
     <!-- FOTO LAINNYA JIKA ADA -->
@@ -379,6 +444,69 @@
                 </tr>
             @endforeach
         </table>
+    @endif
+
+    <!-- LAMPIRAN BUKTI TRANSFER BALIK SISA SALDO BBM (UNTUK ASM & RGM) -->
+    @if(!empty($returnProofBase64))
+        <div style="page-break-before: always;"></div>
+        <table class="header-table">
+            <tr>
+                <td style="width: 70%;">
+                    <div class="company-title">PT. MEDIA SELULAR INDONESIA</div>
+                    <div style="font-size: 8px; color: #475569;">Lampiran Bukti Transfer Sisa Saldo - No. UID: {{ $claim->_uid ?: 'DRAFT' }}</div>
+                </td>
+                <td style="width: 30%; text-align: right;">
+                    <div style="font-size: 8.5px; font-weight: bold; color: #0f766e;">BUKTI TRANSFER BALIK SISA SALDO</div>
+                    <div style="font-size: 7.5px; color: #64748b;">Pemohon: {{ $employee->name ?? '-' }}</div>
+                </td>
+            </tr>
+        </table>
+
+        <div style="font-weight: bold; font-size: 10px; color: #1e293b; margin-bottom: 8px;">
+            BUKTI PENGEMBALIAN / TRANSFER SISA BUDGET BBM :
+        </div>
+
+        <table class="info-table" style="margin-bottom: 12px;">
+            <tr>
+                <td style="width: 50%;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="width: 140px; font-weight: bold; color: #475569; padding: 2px 0;">Plafon Budget BBM Awal</td>
+                            <td style="padding: 2px 0;">: Rp {{ number_format((float)($employee->bbm_budget ?? 0), 0, ',', '.') }}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; color: #475569; padding: 2px 0;">Total Realisasi Nota Balik BBM</td>
+                            <td style="padding: 2px 0;">: <strong>Rp {{ number_format((float)$claim->amount, 0, ',', '.') }}</strong></td>
+                        </tr>
+                    </table>
+                </td>
+                <td style="width: 50%;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="width: 140px; font-weight: bold; color: #475569; padding: 2px 0;">Nominal Ditransfer Balik</td>
+                            <td style="padding: 2px 0;">: <strong style="color: #0f766e; font-size: 9.5px;">Rp {{ number_format((float)($claim->return_transfer_amount ?: $claim->remaining_budget_amount), 0, ',', '.') }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; color: #475569; padding: 2px 0;">Waktu Transfer</td>
+                            <td style="padding: 2px 0;">: {{ $claim->return_transferred_at ? $claim->return_transferred_at->format('d/m/Y H:i') : '-' }}</td>
+                        </tr>
+                        @if(!empty($claim->return_transfer_notes))
+                            <tr>
+                                <td style="font-weight: bold; color: #475569; padding: 2px 0;">Catatan Transfer</td>
+                                <td style="padding: 2px 0;">: {{ $claim->return_transfer_notes }}</td>
+                            </tr>
+                        @endif
+                    </table>
+                </td>
+            </tr>
+        </table>
+
+        <div class="photo-card" style="margin-bottom: 14px; page-break-inside: avoid; text-align: center;">
+            <div style="font-size: 8.5px; font-weight: bold; color: #0f172a; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e2e8f0; text-align: left;">
+                FOTO STRUK / BUKTI TRANSFER PENGEMBALIAN SISA SALDO KE FINANCE
+            </div>
+            <img src="{{ $returnProofBase64 }}" class="photo-img" style="max-height: 480px; max-width: 100%; object-fit: contain;" alt="Bukti Transfer Sisa Saldo">
+        </div>
     @endif
 
 </body>

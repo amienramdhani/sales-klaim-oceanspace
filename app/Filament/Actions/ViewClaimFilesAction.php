@@ -23,9 +23,12 @@ class ViewClaimFilesAction extends Action
         ->icon('heroicon-o-paper-clip')
         ->color(fn (Claim $record) => $record->getAllAttachedFilesCount() > 0 ? 'info' : 'gray')
         ->tooltip(fn (Claim $record) => "Lihat {$record->getAllAttachedFilesCount()} berkas/foto nota, kwitansi, dan lampiran klaim ini")
-        ->modalHeading(fn (Claim $record) => "Berkas Lampiran: " . ($record->effective_employee?->name ?? 'Pemohon') . " — " . ($record->claim_type_string ?? 'Klaim'))
+        ->modalHeading(fn (Claim $record) => "Berkas: " . ($record->effective_employee?->name ?? 'Pemohon') . " (" . ($record->claim_type_string ?? 'Klaim') . ")")
+        ->modalCloseButton(true)
+        ->closeModalByClickingAway(true)
+        ->closeModalByEscaping(true)
         ->modalSubmitAction(false)
-        ->modalCancelActionLabel('Tutup')
+        ->modalCancelAction(fn (\Filament\Actions\StaticAction $action) => $action->label('Tutup Berkas')->color('gray'))
         ->modalWidth('5xl')
         ->modalContent(fn (Claim $record) => view('filament.components.claim-files-modal', [
             'record' => $record,

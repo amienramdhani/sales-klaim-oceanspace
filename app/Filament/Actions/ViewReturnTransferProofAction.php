@@ -22,8 +22,11 @@ class ViewReturnTransferProofAction extends Action
             ->color('success')
             ->visible(fn (Claim $record) => !empty($record->return_transfer_proof))
             ->modalHeading('Foto / Dokumen Bukti Transfer Pengembalian Sisa Dana ke Finance')
+            ->modalCloseButton(true)
+            ->closeModalByClickingAway(true)
+            ->closeModalByEscaping(true)
             ->modalSubmitAction(false)
-            ->modalCancelActionLabel('Tutup')
+            ->modalCancelAction(fn (\Filament\Actions\StaticAction $action) => $action->label('Tutup')->color('gray'))
             ->modalContent(fn (Claim $record) => view('filament.components.return-transfer-proof-modal', [
                 'photo' => $record->return_transfer_proof,
                 'record' => $record,

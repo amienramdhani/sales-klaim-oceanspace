@@ -14,8 +14,12 @@ class ClaimObserver
     public function created(Claim $claim): void
     {
         try {
-            // Ketika klaim baru dibuat dan statusnya DIAJUKAN (default), kirim notifikasi secara background non-blocking
-            if ($claim->approval_status === 'DIAJUKAN') {
+            // Ketika klaim baru dibuat, kirim notifikasi sesuai status awal
+            if ($claim->approval_status === 'ACC_ASM') {
+                app(ClaimTelegramNotificationService::class)->dispatchAsync($claim->id, 'asm_approved');
+            } elseif ($claim->approval_status === 'ACC_RGM') {
+                app(ClaimTelegramNotificationService::class)->dispatchAsync($claim->id, 'rgm_approved');
+            } elseif ($claim->approval_status === 'DIAJUKAN') {
                 app(ClaimTelegramNotificationService::class)->dispatchAsync($claim->id, 'new_claim');
             }
         } catch (\Throwable $e) {
@@ -47,18 +51,33 @@ class ClaimObserver
                         break;
 
                     case 'ACC_RGM':
-                        // Disetujui RGM -> Notif ke Head of Sales (Pak Jejen)
+                        // Disetujui RGM -> Notif ke Admin
                         $notificationService->dispatchAsync($claim->id, 'rgm_approved');
                         break;
 
-                    case 'ACC_PAK_JEJEN':
-                        // Disetujui Pak Jejen -> Notif ke Admin
-                        $notificationService->dispatchAsync($claim->id, 'jejen_approved');
+                    case 'ACC_ADMIN':
+                        // Diverifikasi Admin -> Notif ke Head of Sales (Pak Jejen)
+                        $notificationService->dispatchAsync($claim->id, 'admin_approved');
+                        break;
+
+                    case 'WAITING_YOGA':
+                        // Disetujui Head of Sales (Pak Jejen) untuk PT Media Selular Indonesia -> Notif ke Manager Finance (Pak Yoga P. Hadi)
+                        $notificationService->dispatchAsync($claim->id, 'waiting_yoga');
+                        break;
+
+                    case 'WAITING_THIA':
+                        // Disetujui Head of Sales (Pak Jejen) untuk CV Top Selular -> Notif ke Manajer Keuangan (Thia Aisyah)
+                        $notificationService->dispatchAsync($claim->id, 'waiting_thia');
+                        break;
+
+                    case 'WAITING_NURBAITI':
+                        // Disetujui Manager Finance (Pak Yoga P. Hadi) -> Notif ke Finance Coordinator (Bu Nurbaeti Riaseha)
+                        $notificationService->dispatchAsync($claim->id, 'waiting_nurbaiti');
                         break;
 
                     case 'DISETUJUI':
-                        // Diverifikasi Admin -> Notif ke Finance
-                        $notificationService->dispatchAsync($claim->id, 'admin_approved');
+                        // Disetujui penuh (Nurbaeti / Thia) -> Notif ke Finance sesuai Badan Usaha untuk antrean pencairan
+                        $notificationService->dispatchAsync($claim->id, 'approved_for_disbursement');
                         break;
 
                     case 'DITOLAK_FINANCE':
@@ -75,6 +94,9 @@ class ClaimObserver
                         if (auth()->check()) {
                             $u = auth()->user();
                             if ($u->isJejen()) $role = 'Head of Sales (Pak Jejen)';
+                            elseif ($u->isYoga()) $role = 'Manager Finance (Pak Yoga P. Hadi)';
+                            elseif ($u->isNurbaiti()) $role = 'Finance Coordinator (Bu Nurbaeti Riaseha)';
+                            elseif ($u->isThia()) $role = 'Manajer Keuangan (Thia Aisyah)';
                             elseif ($u->isRgm()) $role = 'RGM';
                             elseif ($u->isAsm()) $role = 'ASM';
                             elseif ($u->isAdmin()) $role = 'Admin';

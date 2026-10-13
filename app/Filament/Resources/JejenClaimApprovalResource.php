@@ -41,7 +41,7 @@ class JejenClaimApprovalResource extends Resource
         if (!$user || (!$user->isJejen() && !$user->isSuperAdmin())) {
             return null;
         }
-        $count = Claim::pendingJejenApproval()->count();
+        $count = cache()->remember('badge_jejen_approval', 10, fn () => Claim::pendingJejenApproval()->count());
         return $count > 0 ? (string) $count : null;
     }
 
@@ -100,6 +100,16 @@ class JejenClaimApprovalResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('_uid')
+                    ->label('_UID')
+                    ->badge()
+                    ->color('info')
+                    ->weight('bold')
+                    ->placeholder('-')
+                    ->searchable()
+                    ->sortable()
+                    ->copyable(),
+
                 Tables\Columns\TextColumn::make('claim_category')
                     ->label('Kategori')
                     ->badge()
@@ -125,14 +135,18 @@ class JejenClaimApprovalResource extends Resource
 
                 Tables\Columns\TextColumn::make('effective_employee.name')
                     ->label('Pemohon')
-                    ->description(fn (Claim $record) => ($record->effective_employee?->position_name ?? 'Staff') . ' - ' . ($record->branch?->name ?? $record->region ?? '-'))
+                    ->description(fn (Claim $record) => \Illuminate\Support\Str::limit(
+                        ($record->effective_employee?->position_name ?? 'Staff') . ' - ' . ($record->branch?->name ?? $record->region ?? '-'),
+                        40
+                    ))
                     ->searchable()
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('purpose_string')
                     ->label('Keperluan / Tujuan')
                     ->limit(35)
-                    ->tooltip(fn ($state) => $state),
+                    ->tooltip(fn ($state) => $state)
+                    ->visibleFrom('md'),
 
                 Tables\Columns\TextColumn::make('amount')
                     ->label('Nominal')
@@ -145,9 +159,9 @@ class JejenClaimApprovalResource extends Resource
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'DIAJUKAN' => 'Menunggu Persetujuan',
                         'ACC_ASM' => 'ACC ASM (Menunggu RGM)',
-                        'ACC_RGM' => 'ACC RGM (Menunggu Pak Jejen)',
-                        'ACC_PAK_JEJEN' => 'ACC Pak Jejen (Menunggu Admin)',
-                        'DISETUJUI' => 'Disetujui Admin (Siap Cair)',
+                        'ACC_RGM' => 'ACC RGM (Menunggu Admin)',
+                        'ACC_ADMIN' => 'ACC Admin (Menunggu Pak Jejen)',
+                        'ACC_PAK_JEJEN', 'DISETUJUI' => 'Disetujui Pak Jejen (Siap Cair)',
                         'DITOLAK_FINANCE' => 'Ditolak Finance (Perlu Revisi)',
                         'DITOLAK' => 'Ditolak',
                         default => $state,
@@ -156,8 +170,8 @@ class JejenClaimApprovalResource extends Resource
                         'DIAJUKAN' => 'warning',
                         'ACC_ASM' => 'info',
                         'ACC_RGM' => 'primary',
-                        'ACC_PAK_JEJEN' => 'secondary',
-                        'DISETUJUI' => 'success',
+                        'ACC_ADMIN' => 'secondary',
+                        'ACC_PAK_JEJEN', 'DISETUJUI' => 'success',
                         'DITOLAK', 'DITOLAK_FINANCE' => 'danger',
                         default => 'gray',
                     }),
@@ -171,7 +185,7 @@ class JejenClaimApprovalResource extends Resource
                 Tables\Filters\SelectFilter::make('claim_category')
                     ->label('Kategori Klaim')
                     ->options([
-                        'bbm' => 'Klaim BBM',
+                        'bbm' => 'Nota Balik BBM',
                         'transport_entertain' => 'Klaim Transport & Entertain',
                         'perdin' => 'Perjalanan Dinas',
                         'service' => 'Service Motor',
@@ -195,106 +209,49 @@ class JejenClaimApprovalResource extends Resource
                 // Lihat Berkas
                 \App\Filament\Actions\ViewClaimFilesAction::make(),
 
-                // Detail (dengan aksi konfirmasi di dalam modal footer)
-                Tables\Actions\ViewAction::make()
-                    ->label('Detail')
-                    ->color('gray')
-                    ->extraModalFooterActions(fn (Claim $record): array => [
-                        Tables\Actions\Action::make('modal_acc_jejen')
-                            ->label('Konfirmasi ACC')
-                            ->icon('heroicon-o-check-circle')
-                            ->color('success')
-                            ->visible(function () use ($record) {
-                                if (in_array($record->approval_status, ['ACC_PAK_JEJEN', 'DISETUJUI', 'Sudah Dicairkan', 'DITOLAK', 'DITOLAK_FINANCE'])) {
-                                    return false;
-                                }
-                                $applicantEmp = $record->effective_employee;
-                                $isRgm = ($applicantEmp?->isRgm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'RGM') || str_contains(strtoupper($applicantEmp?->role?->name ?? ''), 'RGM'));
-                                $isAsm = ($applicantEmp?->isAsm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'ASM') || str_contains(strtoupper($applicantEmp?->role?->name ?? ''), 'ASM'));
-
-                                if ($record->approval_status === 'ACC_RGM' || $record->approval_status === 'ACC_ASM') return true;
-                                if (($isRgm || $isAsm) && $record->approval_status === 'DIAJUKAN') return true;
-                                return false;
-                            })
-                            ->requiresConfirmation()
-                            ->modalHeading('Konfirmasi Persetujuan Head of Sales')
-                            ->modalDescription(fn () => "Apakah Anda yakin menyetujui klaim senilai Rp " . number_format($record->amount, 0, ',', '.') . " untuk " . ($record->effective_employee?->name ?? 'Pemohon') . "? Status akan diubah menjadi ACC Pak Jejen dan diteruskan ke Admin untuk verifikasi.")
-                            ->modalSubmitActionLabel('Ya, Konfirmasi & Setujui')
-                            ->action(function () use ($record) {
-                                $record->update([
-                                    'approval_status' => 'ACC_PAK_JEJEN',
-                                    'approved_by_jejen_id' => auth()->id(),
-                                    'approved_by_jejen_at' => now(),
-                                ]);
-
-                                Notification::make()
-                                    ->title('Klaim Berhasil Dikonfirmasi & Disetujui Head of Sales')
-                                    ->body('Status berubah menjadi ACC Pak Jejen dan diteruskan ke Admin untuk verifikasi.')
-                                    ->success()
-                                    ->send();
-                            }),
-
-                        Tables\Actions\Action::make('modal_reject_jejen')
-                            ->label('Tolak')
-                            ->icon('heroicon-o-x-circle')
-                            ->color('danger')
-                            ->visible(function () use ($record) {
-                                if (in_array($record->approval_status, ['ACC_PAK_JEJEN', 'DISETUJUI', 'Sudah Dicairkan', 'DITOLAK', 'DITOLAK_FINANCE'])) {
-                                    return false;
-                                }
-                                return true;
-                            })
-                            ->form([
-                                Forms\Components\Textarea::make('rejection_reason')
-                                    ->label('Alasan Penolakan')
-                                    ->required()
-                                    ->rows(3),
-                            ])
-                            ->action(function (array $data) use ($record) {
-                                $record->update([
-                                    'approval_status' => 'DITOLAK',
-                                    'rejection_reason' => $data['rejection_reason'],
-                                ]);
-
-                                Notification::make()
-                                    ->title('Klaim Ditolak oleh Head of Sales')
-                                    ->danger()
-                                    ->send();
-                            }),
-                    ]),
-
-                // Tombol Konfirmasi ACC di Baris Tabel
+                // Tombol ACC di Baris Tabel (Menyetujui klaim yang sudah diverifikasi Admin)
                 Tables\Actions\Action::make('acc_jejen')
-                    ->label('Konfirmasi ACC')
+                    ->label('ACC')
                     ->button()
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(function (Claim $record) {
-                        if (in_array($record->approval_status, ['ACC_PAK_JEJEN', 'DISETUJUI', 'Sudah Dicairkan', 'DITOLAK', 'DITOLAK_FINANCE'])) {
-                            return false;
-                        }
-                        $applicantEmp = $record->effective_employee;
-                        $isRgm = ($applicantEmp?->isRgm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'RGM') || str_contains(strtoupper($applicantEmp?->role?->name ?? ''), 'RGM'));
-                        $isAsm = ($applicantEmp?->isAsm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'ASM') || str_contains(strtoupper($applicantEmp?->role?->name ?? ''), 'ASM'));
-
-                        if ($record->approval_status === 'ACC_RGM' || $record->approval_status === 'ACC_ASM') return true;
-                        if (($isRgm || $isAsm) && $record->approval_status === 'DIAJUKAN') return true;
-                        return false;
-                    })
+                    ->visible(fn (Claim $record) => $record->approval_status === 'ACC_ADMIN')
                     ->requiresConfirmation()
                     ->modalHeading('Konfirmasi Persetujuan Head of Sales')
-                    ->modalDescription(fn (Claim $record) => "Apakah Anda yakin menyetujui klaim senilai Rp " . number_format($record->amount, 0, ',', '.') . " untuk " . ($record->effective_employee?->name ?? 'Pemohon') . "? Status akan diubah menjadi ACC Pak Jejen dan diteruskan ke Admin untuk verifikasi.")
+                    ->modalDescription(function (Claim $record) {
+                        $isTop = $record->isTopSelular();
+                        $nextTarget = $isTop ? 'Manajer Keuangan (Thia Aisyah) - CV Top Selular' : 'Manager Finance (Yoga P. Hadi) - PT Media Selular Indonesia';
+                        return "Apakah Anda yakin menyetujui klaim senilai Rp " . number_format($record->amount, 0, ',', '.') . " untuk " . ($record->effective_employee?->name ?? 'Pemohon') . "? Pengajuan akan diteruskan ke {$nextTarget}.";
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('approval_note')
+                            ->label('Catatan Persetujuan (Opsional)')
+                            ->placeholder('Tambahkan catatan atau arahan persetujuan jika ada...')
+                            ->rows(2),
+                    ])
                     ->modalSubmitActionLabel('Ya, Konfirmasi & Setujui')
-                    ->action(function (Claim $record) {
+                    ->action(function (Claim $record, array $data) {
+                        $isTop = $record->isTopSelular();
+
+                        if ($isTop) {
+                            $nextStatus = 'WAITING_THIA';
+                            $msg = 'Klaim berhasil disetujui Head of Sales dan diteruskan ke Bu Thia Aisyah (Manajer Keuangan CV Top Selular).';
+                        } else {
+                            $nextStatus = 'WAITING_YOGA';
+                            $msg = 'Klaim berhasil disetujui Head of Sales dan diteruskan ke Pak Yoga P. Hadi (Manager Finance PT Media Selular Indonesia).';
+                        }
+
                         $record->update([
-                            'approval_status' => 'ACC_PAK_JEJEN',
+                            'approval_status' => $nextStatus,
                             'approved_by_jejen_id' => auth()->id(),
                             'approved_by_jejen_at' => now(),
+                            'jejen_approval_note' => $data['approval_note'] ?? null,
+                            'approval_note' => $data['approval_note'] ?? $record->approval_note,
                         ]);
 
                         Notification::make()
-                            ->title('Klaim Berhasil Dikonfirmasi & Disetujui Head of Sales')
-                            ->body('Status berubah menjadi ACC Pak Jejen dan diteruskan ke Admin untuk verifikasi.')
+                            ->title('Klaim Berhasil Disetujui Head of Sales')
+                            ->body($msg)
                             ->success()
                             ->send();
                     }),
@@ -305,18 +262,7 @@ class JejenClaimApprovalResource extends Resource
                     ->button()
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(function (Claim $record) {
-                        if (in_array($record->approval_status, ['ACC_PAK_JEJEN', 'DISETUJUI', 'Sudah Dicairkan', 'DITOLAK', 'DITOLAK_FINANCE'])) {
-                            return false;
-                        }
-                        $applicantEmp = $record->effective_employee;
-                        $isRgm = ($applicantEmp?->isRgm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'RGM') || str_contains(strtoupper($applicantEmp?->role?->name ?? ''), 'RGM'));
-                        $isAsm = ($applicantEmp?->isAsm() || str_contains(strtoupper($applicantEmp?->position_name ?? ''), 'ASM') || str_contains(strtoupper($applicantEmp?->role?->name ?? ''), 'ASM'));
-
-                        if ($record->approval_status === 'ACC_RGM' || $record->approval_status === 'ACC_ASM') return true;
-                        if (($isRgm || $isAsm) && $record->approval_status === 'DIAJUKAN') return true;
-                        return false;
-                    })
+                    ->visible(fn (Claim $record) => $record->approval_status === 'ACC_ADMIN')
                     ->form([
                         Forms\Components\Textarea::make('rejection_reason')
                             ->label('Alasan Penolakan')
@@ -364,10 +310,24 @@ class JejenClaimApprovalResource extends Resource
                         ->color('danger')
                         ->visible(fn (Claim $record) => $record->claim_category !== 'bbm' && !str_contains(strtoupper($record->claim_type_string ?? ''), 'BBM'))
                         ->action(fn (Claim $record) => app(ClaimPdfExportService::class)->exportTransportEntertainSinglePdf($record)),
+
+                    Tables\Actions\Action::make('export_attendance_word')
+                        ->label('Daftar Hadir Word (.docx)')
+                        ->icon('heroicon-o-clipboard-document-check')
+                        ->color('info')
+                        ->visible(fn (Claim $record) => $record->hasAttendanceData())
+                        ->action(function (Claim $record) {
+                            $doc = $record->buildAttendanceDocInstance();
+                            if (!$doc) {
+                                Notification::make()->title('Data daftar hadir belum tersedia.')->warning()->send();
+                                return null;
+                            }
+                            return app(\App\Services\AttendanceWordExportService::class)->export($doc);
+                        }),
                 ])
                 ->label('Download')
                 ->icon('heroicon-o-arrow-down-tray')
-                ->color('gray'),
+                ->color('success'),
             ])
             ->bulkActions([
                 Tables\Actions\BulkAction::make('bulk_acc_jejen')
@@ -375,14 +335,15 @@ class JejenClaimApprovalResource extends Resource
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->requiresConfirmation()
-                    ->modalHeading('Konfirmasi Seluruh Klaim Terpilih')
-                    ->modalDescription('Semua klaim yang menunggu persetujuan Head of Sales akan disetujui dan diteruskan ke Admin untuk verifikasi.')
+                    ->modalHeading('Konfirmasi Seluruh Klaim Terpilih (Head of Sales)')
+                    ->modalDescription('Semua klaim terpilih yang diverifikasi Admin akan disetujui Head of Sales dan diteruskan ke tahapan persetujuan berikutnya (Manager Finance Pak Yoga untuk PT MSI atau Manajer Keuangan Bu Thia untuk CV Top Selular).')
                     ->action(function (Collection $records) {
                         $count = 0;
                         foreach ($records as $record) {
-                            if (!in_array($record->approval_status, ['ACC_PAK_JEJEN', 'DISETUJUI', 'Sudah Dicairkan', 'DITOLAK', 'DITOLAK_FINANCE'])) {
+                            if (in_array($record->approval_status, ['ACC_ADMIN'])) {
+                                $nextStatus = $record->isTopSelular() ? 'WAITING_THIA' : 'WAITING_YOGA';
                                 $record->update([
-                                    'approval_status' => 'ACC_PAK_JEJEN',
+                                    'approval_status' => $nextStatus,
                                     'approved_by_jejen_id' => auth()->id(),
                                     'approved_by_jejen_at' => now(),
                                 ]);
@@ -391,7 +352,8 @@ class JejenClaimApprovalResource extends Resource
                         }
 
                         Notification::make()
-                            ->title("{$count} Klaim Berhasil Dikonfirmasi & Disetujui Head of Sales")
+                            ->title("{$count} Klaim Berhasil Disetujui Head of Sales dan Diteruskan")
+                            ->body('Klaim PT Media Selular Indonesia diteruskan ke Pak Yoga P. Hadi, dan klaim CV Top Selular diteruskan ke Bu Thia Aisyah.')
                             ->success()
                             ->send();
                     }),

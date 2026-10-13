@@ -1,4 +1,23 @@
 <div class="space-y-4">
+    {{-- Quick Mobile Close Bar (Visible only on mobile devices) --}}
+    <div class="sm:hidden flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-950/40 dark:to-orange-950/40 border border-red-200 dark:border-red-900/60 shadow-sm">
+        <div class="flex items-center gap-2">
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 font-bold text-xs">
+                {{ count($files ?? []) }}
+            </span>
+            <div class="flex flex-col">
+                <span class="text-xs font-bold text-gray-900 dark:text-gray-100">Berkas Lampiran</span>
+                <span class="text-[10px] text-gray-500 dark:text-gray-400">{{ count($files ?? []) }} nota/kwitansi</span>
+            </div>
+        </div>
+        <button type="button" 
+                x-on:click="const btn = $el.closest('.fi-modal-window')?.querySelector('.fi-modal-close-btn'); if (btn) { btn.click(); } else { $dispatch('close-modal'); if (typeof close === 'function') close(); }"
+                class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold shadow transition transform active:scale-95 touch-manipulation">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+            <span>Tutup Berkas</span>
+        </button>
+    </div>
+
     {{-- Header Info Klaim --}}
     <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
@@ -49,10 +68,10 @@
             <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200">
                 Total {{ count($files) }} Berkas Terlampir
             </h4>
-            <span class="text-xs text-gray-500">Klik gambar untuk membuka ukuran penuh di tab baru</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">Klik gambar untuk membuka ukuran penuh di tab baru</span>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[65vh] overflow-y-auto pr-1">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             @foreach($files as $index => $file)
                 <div class="group relative flex flex-col rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition duration-200">
                     {{-- File Preview Area --}}
@@ -148,4 +167,14 @@
             @endforeach
         </div>
     @endif
+
+    {{-- Mobile Bottom Quick Close Button --}}
+    <div class="sm:hidden pt-3 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-2">
+        <button type="button" 
+                x-on:click="const btn = $el.closest('.fi-modal-window')?.querySelector('.fi-modal-close-btn'); if (btn) { btn.click(); } else { $dispatch('close-modal'); if (typeof close === 'function') close(); }"
+                class="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-100 hover:bg-gray-200 active:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-100 text-xs font-bold border border-gray-300 dark:border-gray-600 shadow-sm transition touch-manipulation">
+            <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+            <span>Tutup Jendela Berkas</span>
+        </button>
+    </div>
 </div>

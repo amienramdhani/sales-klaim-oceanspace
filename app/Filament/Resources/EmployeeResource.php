@@ -32,17 +32,73 @@ class EmployeeResource extends Resource
         return auth()->user()?->isSuperAdmin() ?? false;
     }
 
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->isSuperAdmin() ?? false;
+    }
+
     public static function form(Form $form): Form
     {
+        $isAsmOrRgm = function (Forms\Get $get, ?Employee $record): bool {
+            $roleId = $get('role_id');
+            if ($roleId) {
+                $role = Role::find($roleId);
+                if ($role) {
+                    $code = strtoupper($role->code ?? '');
+                    $name = strtoupper($role->name ?? '');
+                    if (str_contains($code, 'ASM') || str_contains($code, 'RGM') || str_contains($name, 'ASM') || str_contains($name, 'RGM') || str_contains($name, 'AREA SALES') || str_contains($name, 'REGIONAL GENERAL')) {
+                        return true;
+                    }
+                }
+            }
+
+            $posId = $get('position_id');
+            if ($posId) {
+                $pos = Position::find($posId);
+                if ($pos) {
+                    $name = strtoupper($pos->name ?? '');
+                    if (str_contains($name, 'ASM') || str_contains($name, 'RGM') || str_contains($name, 'AREA SALES') || str_contains($name, 'REGIONAL GENERAL')) {
+                        return true;
+                    }
+                }
+            }
+
+            if ($record) {
+                return $record->isAsm() || $record->isRgm();
+            }
+
+            return false;
+        };
+
         return $form
             ->schema([
+                Forms\Components\Section::make('Akun Pengguna & ID User Terhubung')
+                    ->description('Data akun login pengguna yang terhubung langsung dengan karyawan ini.')
+                    ->icon('heroicon-o-identification')
+                    ->schema([
+                        Forms\Components\Placeholder::make('user_connection_info')
+                            ->label('Status Akun Pengguna')
+                            ->content(function (?Employee $record) {
+                                if (!$record) {
+                                    return 'Akun pengguna (User ID) dan 6 digit PIN awal akan otomatis dibuatkan dan terhubung saat data karyawan ini disimpan.';
+                                }
+                                $u = $record->user ?? \App\Models\User::where('employee_id', $record->id)->orWhere('custom_id', $record->custom_id)->first();
+                                if (!$u) {
+                                    return '⚠️ Belum memiliki akun user login. Akun akan dibuatkan otomatis saat Anda klik Simpan.';
+                                }
+                                $pinStatus = $u->must_change_pin ? 'PIN Awal: ' . ($u->initial_pin ?: '123456') . ' (Wajib ganti saat login)' : 'PIN Aktif (Sudah Diubah Mandiri)';
+                                return "✅ Terhubung ke Akun User [ID Login: {$u->custom_id}] | Email: {$u->email} | Role: " . ($u->role?->name ?? 'User') . " | {$pinStatus}";
+                            }),
+                    ]),
+
                 Forms\Components\Section::make('Informasi Karyawan')
                     ->description('Data diri karyawan yang berhak mengajukan klaim operasional')
                     ->schema([
                         Forms\Components\TextInput::make('custom_id')
-                            ->label('ID Karyawan')
-                            ->placeholder('Contoh: EMP-001 / RGM-PWT01')
-                            ->maxLength(50),
+                            ->label('ID Karyawan / NIK')
+                            ->placeholder('Contoh: 2024.08.13.01 / EMP-001')
+                            ->maxLength(50)
+                            ->helperText('ID Karyawan atau NIK yang digunakan untuk login ke sistem.'),
                         Forms\Components\TextInput::make('name')
                             ->label('Nama Lengkap')
                             ->required()
@@ -53,6 +109,7 @@ class EmployeeResource extends Resource
                             ->relationship('role', 'name')
                             ->searchable()
                             ->preload()
+                            ->live()
                             ->reactive()
                             ->afterStateUpdated(function (Forms\Set $set, $state) {
                                 if ($state) {
@@ -67,6 +124,7 @@ class EmployeeResource extends Resource
                             ->relationship('positionModel', 'name')
                             ->searchable()
                             ->preload()
+                            ->live()
                             ->reactive()
                             ->afterStateUpdated(function (Forms\Set $set, $state) {
                                 if ($state) {
@@ -83,14 +141,31 @@ class EmployeeResource extends Resource
                             ->default('Purwokerto')
                             ->required()
                             ->placeholder('Contoh: Purwokerto / Semarang'),
-                        Forms\Components\TextInput::make('region')
+                        Forms\Components\Select::make('region_id')
                             ->label('Data Region')
-                            ->placeholder('Contoh: CIREBON / JABO / JATENG')
-                            ->datalist([
-                                'CIREBON', 'JABO', 'JABODETABEK', 'JATENG', 'JATIM',
-                                'JOGJA', 'SUMATERA', 'SUMATERA BARAT', 'SUMATRA UTARA & ACEH',
-                                'SULAWESI', 'LAMPUNG & BENGKULU', 'PURWOKERTO', 'JAKARTA'
-                            ]),
+                            ->relationship('regionModel', 'name')
+                            ->searchable()
+                            ->preload()
+                            ->createOptionForm([
+                                Forms\Components\TextInput::make('name')
+                                    ->label('Nama Region')
+                                    ->required()
+                                    ->unique('regions', 'name'),
+                                Forms\Components\TextInput::make('code')
+                                    ->label('Kode Region')
+                                    ->placeholder('Contoh: JTG'),
+                            ])
+                            ->reactive()
+                            ->afterStateUpdated(function (Forms\Set $set, $state) {
+                                if ($state) {
+                                    $reg = \App\Models\Region::find($state);
+                                    if ($reg) {
+                                        $set('region', $reg->name);
+                                    }
+                                }
+                            })
+                            ->helperText('Pilih wilayah region operasional karyawan.'),
+                        Forms\Components\Hidden::make('region'),
                         Forms\Components\TextInput::make('phone')
                             ->label('Nomor Telepon / WhatsApp')
                             ->tel()
@@ -101,6 +176,27 @@ class EmployeeResource extends Resource
                             ->email()
                             ->maxLength(255)
                             ->placeholder('Contoh: hendra@company.com'),
+                        Forms\Components\Select::make('badan_usaha')
+                            ->label('Badan Usaha')
+                            ->options([
+                                'PT MEDIA SELULAR INDONESIA' => 'PT MEDIA SELULAR INDONESIA',
+                                'CV COMPLETE SELULAR' => 'CV COMPLETE SELULAR',
+                                'CV TOP SELULAR' => 'CV TOP SELULAR',
+                            ])
+                            ->default('PT MEDIA SELULAR INDONESIA')
+                            ->required(),
+
+                        Forms\Components\Select::make('managed_branches')
+                            ->label('Cabang Penugasan (Bisa Lebih Dari Satu)')
+                            ->placeholder('Pilih satu atau beberapa cabang penugasan (Sales, ASM, RGM)')
+                            ->helperText('Role Sales, ASM, dan RGM dapat ditugaskan pada lebih dari 1 cabang.')
+                            ->options(\App\Models\Branch::orderBy('name')->pluck('name', 'id')->toArray())
+                            ->multiple()
+                            ->searchable()
+                            ->preload()
+                            ->default(fn (?Employee $record) => $record?->getManagedBranchesList() ?? [])
+                            ->columnSpanFull(),
+
                         Forms\Components\Select::make('status')
                             ->label('Status Karyawan')
                             ->options([
@@ -137,7 +233,7 @@ class EmployeeResource extends Resource
                     ])->columns(3),
 
                 Forms\Components\Section::make('Alokasi Plafon & Budget Karyawan')
-                    ->description('Tentukan anggaran operasional per bulan untuk karyawan ini. Budget BBM diatur fleksibel per user dan terintegrasi langsung ke alur pencairan Finance.')
+                    ->description('Tentukan anggaran operasional per bulan untuk karyawan ini. Plafon BBM dan Entertain khusus untuk jabatan ASM dan RGM.')
                     ->icon('heroicon-o-banknotes')
                     ->schema([
                         Forms\Components\TextInput::make('bbm_budget')
@@ -145,6 +241,7 @@ class EmployeeResource extends Resource
                             ->numeric()
                             ->prefix('Rp')
                             ->default(0)
+                            ->visible($isAsmOrRgm)
                             ->dehydrateStateUsing(fn ($state) => $state !== null && $state !== '' ? (float)$state : 0)
                             ->helperText('Dana BBM bulanan yang dicairkan Finance untuk ASM/RGM ini. Wajib diisi agar Finance dapat mencairkan dana.'),
 
@@ -153,7 +250,8 @@ class EmployeeResource extends Resource
                             ->numeric()
                             ->prefix('Rp')
                             ->placeholder('Standar: ASM 1.5jt / RGM 2.4jt')
-                            ->helperText('Kosongkan jika menggunakan standar jabatan (ASM: Rp 1.500.000, RGM: Rp 2.400.000).'),
+                            ->visible($isAsmOrRgm)
+                            ->helperText('Plafon biaya entertain bulanan khusus ASM dan RGM (ASM: Rp 1.500.000, RGM: Rp 2.400.000).'),
 
                         Forms\Components\TextInput::make('perdin_budget')
                             ->label('Budget Perjalanan Dinas (Rp)')
@@ -164,12 +262,13 @@ class EmployeeResource extends Resource
                             ->helperText('Batas tunjangan & akomodasi perjalanan dinas bulanan.'),
 
                         Forms\Components\TextInput::make('transport_budget')
-                            ->label('Budget Transport / Tol / Parkir (Rp)')
-                            ->numeric()
-                            ->prefix('Rp')
+                            ->label('Budget Transport / Tol / Parkir')
+                            ->placeholder('Tanpa Limit (Bebas Biaya)')
+                            ->disabled()
+                            ->dehydrated()
                             ->default(0)
-                            ->dehydrateStateUsing(fn ($state) => $state !== null && $state !== '' ? (float)$state : 0)
-                            ->helperText('Batas kompensasi tiket transportasi, tol, dan parkir.'),
+                            ->dehydrateStateUsing(fn () => 0)
+                            ->helperText('SOP Baru: Uang tol, parkir, dan tiket transportasi TIDAK MEMILIKI BATASAN LIMIT.'),
                     ])->columns(2),
 
                 Forms\Components\Section::make('Standar Anggaran Perjalanan Dinas (Perdin Daerah)')
@@ -232,6 +331,11 @@ class EmployeeResource extends Resource
             ]);
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with(['role', 'positionModel', 'supervisor', 'regionModel', 'user']);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
@@ -247,6 +351,31 @@ class EmployeeResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->weight('bold'),
+                Tables\Columns\TextColumn::make('user_account')
+                    ->label('ID Pengguna & User')
+                    ->state(function (Employee $record) {
+                        $u = $record->user ?? \App\Models\User::where('employee_id', $record->id)->orWhere('custom_id', $record->custom_id)->first();
+                        if (!$u) {
+                            return 'Belum Terhubung';
+                        }
+                        return $u->custom_id ?: $u->name;
+                    })
+                    ->description(function (Employee $record) {
+                        $u = $record->user ?? \App\Models\User::where('employee_id', $record->id)->orWhere('custom_id', $record->custom_id)->first();
+                        if (!$u) {
+                            return 'Klik Kelola User';
+                        }
+                        return ($u->role?->name ?? 'Role User') . ($u->initial_pin && $u->must_change_pin ? " [PIN: {$u->initial_pin}]" : '');
+                    })
+                    ->badge()
+                    ->color(function (Employee $record) {
+                        $u = $record->user ?? \App\Models\User::where('employee_id', $record->id)->orWhere('custom_id', $record->custom_id)->first();
+                        return $u ? 'success' : 'danger';
+                    })
+                    ->icon(function (Employee $record) {
+                        $u = $record->user ?? \App\Models\User::where('employee_id', $record->id)->orWhere('custom_id', $record->custom_id)->first();
+                        return $u ? 'heroicon-m-check-badge' : 'heroicon-m-x-circle';
+                    }),
                 Tables\Columns\TextColumn::make('position_display')
                     ->label('Jabatan / Role')
                     ->state(fn (Employee $record) => $record->role?->name ?? $record->positionModel?->name ?? $record->position ?? '-')
@@ -308,12 +437,6 @@ class EmployeeResource extends Resource
                         'Nonaktif' => 'danger',
                         default => 'gray',
                     }),
-                Tables\Columns\TextColumn::make('supervisor.name')
-                    ->label('Atasan Langsung')
-                    ->default('-')
-                    ->searchable()
-                    ->badge()
-                    ->color('warning'),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('role_id')
@@ -327,6 +450,96 @@ class EmployeeResource extends Resource
                     ]),
             ])
             ->actions([
+                Tables\Actions\Action::make('sync_user_account')
+                    ->label('Kelola User ID')
+                    ->icon('heroicon-o-key')
+                    ->color('info')
+                    ->modalHeading(fn (Employee $record) => "Kelola Akun Login & User: {$record->name}")
+                    ->modalDescription('ID Pengguna / NIK dan PIN digunakan karyawan untuk login ke sistem.')
+                    ->modalSubmitActionLabel('Simpan & Sinkronkan User')
+                    ->form([
+                        Forms\Components\Placeholder::make('info_karyawan')
+                            ->label('Data Karyawan')
+                            ->content(fn (Employee $record) => "Nama: {$record->name} | NIK: " . ($record->custom_id ?: 'Belum diisi') . " | Role: " . ($record->role?->name ?? 'Sales')),
+                        Forms\Components\TextInput::make('user_custom_id')
+                            ->label('ID Karyawan / NIK (Untuk Login)')
+                            ->default(fn (Employee $record) => $record->user?->custom_id ?? $record->custom_id)
+                            ->required(),
+                        Forms\Components\TextInput::make('user_email')
+                            ->label('Email Akun')
+                            ->email()
+                            ->default(fn (Employee $record) => $record->user?->email ?? ($record->email ?: \Illuminate\Support\Str::slug($record->name, '.') . '@msi.co.id'))
+                            ->required(),
+                        Forms\Components\Select::make('user_role_id')
+                            ->label('Role Akses Pengguna')
+                            ->relationship('role', 'name')
+                            ->default(fn (Employee $record) => $record->user?->role_id ?? $record->role_id)
+                            ->required(),
+                        Forms\Components\TextInput::make('new_pin')
+                            ->label('Reset / Ganti PIN (6 Digit Angka)')
+                            ->numeric()
+                            ->length(6)
+                            ->placeholder('Kosongkan jika tidak ingin mengubah PIN')
+                            ->helperText('Jika diisi, PIN login akun pengguna ini akan diubah dan wajib diperbarui saat login pertama.'),
+                    ])
+                    ->action(function (Employee $record, array $data) {
+                        $user = $record->user ?? \App\Models\User::where('employee_id', $record->id)->orWhere('custom_id', $record->custom_id)->first();
+                        $nik = trim($data['user_custom_id']);
+                        $email = trim($data['user_email']);
+                        $roleId = $data['user_role_id'];
+                        $newPin = !empty($data['new_pin']) ? trim($data['new_pin']) : null;
+
+                        if (!$user) {
+                            $pin = $newPin ?: str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+                            $user = \App\Models\User::create([
+                                'name' => $record->name,
+                                'custom_id' => $nik,
+                                'email' => $email,
+                                'password' => \Illuminate\Support\Facades\Hash::make($pin),
+                                'must_change_pin' => true,
+                                'initial_pin' => $pin,
+                                'employee_id' => $record->id,
+                                'role_id' => $roleId,
+                                'homebase' => $record->homebase,
+                                'region' => $record->region,
+                                'managed_branches' => $record->getManagedBranchesList(),
+                                'company' => $record->company,
+                                'badan_usaha' => $record->badan_usaha,
+                            ]);
+                            \Filament\Notifications\Notification::make()
+                                ->title('Akun Pengguna Berhasil Dibuat')
+                                ->body("User ID {$nik} telah dibuat dengan PIN awal: {$pin}")
+                                ->success()
+                                ->send();
+                        } else {
+                            $user->employee_id = $record->id;
+                            $user->name = $record->name;
+                            $user->custom_id = $nik;
+                            $user->email = $email;
+                            $user->role_id = $roleId;
+                            $user->region = $record->region;
+                            $user->homebase = $record->homebase;
+                            if ($newPin) {
+                                $user->password = \Illuminate\Support\Facades\Hash::make($newPin);
+                                $user->initial_pin = $newPin;
+                                $user->must_change_pin = true;
+                                $user->pin_changed_at = null;
+                            }
+                            $user->save();
+                            \Filament\Notifications\Notification::make()
+                                ->title('Akun Pengguna Berhasil Disinkronkan')
+                                ->body("Data user ID {$nik} telah diperbarui" . ($newPin ? " dengan PIN baru: {$newPin}" : ''))
+                                ->success()
+                                ->send();
+                        }
+
+                        if ($record->custom_id !== $nik || $record->email !== $email || $record->role_id !== $roleId) {
+                            $record->custom_id = $nik;
+                            $record->email = $email;
+                            $record->role_id = $roleId;
+                            $record->saveQuietly();
+                        }
+                    }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])

@@ -94,6 +94,38 @@ class Claim extends Model
         'service_photo_before',
         'service_photo_after',
         'service_photo_combined',
+        'company',
+        'badan_usaha',
+        'actual_fuel_cost',
+        'actual_toll_cost',
+        'actual_car_rental_cost',
+        'actual_service_cost',
+        'actual_meal_allowance',
+        'actual_amount_total',
+        'remaining_amount_calculated',
+        'nota_balik_status',
+        'nota_balik_rejection_reason',
+        'approved_by_yoga_id',
+        'approved_by_yoga_at',
+        'approved_by_nurbaiti_id',
+        'approved_by_nurbaiti_at',
+        'approved_by_thia_id',
+        'approved_by_thia_at',
+        'travel_cost',
+        'actual_travel_cost',
+        'other_transport_cost',
+        'actual_other_transport_cost',
+        'custom_bank_name',
+        'custom_bank_account_number',
+        'custom_bank_account_name',
+        'approval_note',
+        'asm_approval_note',
+        'rgm_approval_note',
+        'admin_approval_note',
+        'jejen_approval_note',
+        'yoga_approval_note',
+        'nurbaiti_approval_note',
+        'thia_approval_note',
     ];
 
     protected $casts = [
@@ -104,6 +136,20 @@ class Claim extends Model
         'fuel_extra_amount' => 'decimal:2',
         'return_transfer_amount' => 'decimal:2',
         'return_transferred_at' => 'datetime',
+        'actual_fuel_cost' => 'decimal:2',
+        'actual_toll_cost' => 'decimal:2',
+        'actual_car_rental_cost' => 'decimal:2',
+        'actual_service_cost' => 'decimal:2',
+        'actual_meal_allowance' => 'decimal:2',
+        'actual_travel_cost' => 'decimal:2',
+        'actual_other_transport_cost' => 'decimal:2',
+        'travel_cost' => 'decimal:2',
+        'other_transport_cost' => 'decimal:2',
+        'actual_amount_total' => 'decimal:2',
+        'remaining_amount_calculated' => 'decimal:2',
+        'approved_by_yoga_at' => 'datetime',
+        'approved_by_nurbaiti_at' => 'datetime',
+        'approved_by_thia_at' => 'datetime',
         'admin_gform_submitted' => 'boolean',
         'admin_gform_submitted_at' => 'datetime',
         'nota_balik_submitted' => 'boolean',
@@ -136,6 +182,118 @@ class Claim extends Model
         'disbursed_at' => 'datetime',
     ];
 
+    public function getEffectiveBankName(): string
+    {
+        return !empty($this->custom_bank_name)
+            ? $this->custom_bank_name
+            : ($this->effective_employee?->bank_name ?? '-');
+    }
+
+    public function getEffectiveBankNameAttribute(): string
+    {
+        return $this->getEffectiveBankName();
+    }
+
+    public function getEffectiveBankAccountNumber(): string
+    {
+        return !empty($this->custom_bank_account_number)
+            ? $this->custom_bank_account_number
+            : ($this->effective_employee?->bank_account_number ?? '-');
+    }
+
+    public function getEffectiveBankAccountNumberAttribute(): string
+    {
+        return $this->getEffectiveBankAccountNumber();
+    }
+
+    public function getEffectiveBankAccountName(): string
+    {
+        return !empty($this->custom_bank_account_name)
+            ? $this->custom_bank_account_name
+            : ($this->effective_employee?->bank_account_name ?? ($this->effective_employee?->name ?? '-'));
+    }
+
+    public function getEffectiveBankAccountNameAttribute(): string
+    {
+        return $this->getEffectiveBankAccountName();
+    }
+
+    public static function generateUid(?string $badanUsaha = null): string
+    {
+        $bu = strtoupper(trim((string)$badanUsaha));
+        $prefix = (str_contains($bu, 'MEDIA SELULAR') || str_contains($bu, 'MSI')) ? 'MSI-' : 'UID-';
+
+        do {
+            $digits = str_pad((string)random_int(10000, 99999), 5, '0', STR_PAD_LEFT);
+            $candidate = $prefix . $digits;
+        } while (static::where('_uid', $candidate)->exists());
+
+        return $candidate;
+    }
+
+    public function isTopSelular(): bool
+    {
+        $bu = strtoupper(trim((string)($this->badan_usaha ?? $this->company ?? '')));
+        return str_contains($bu, 'TOP') || str_contains($bu, 'COMPLETE') || str_contains($bu, 'CV');
+    }
+
+    public function isMediaSelularIndonesia(): bool
+    {
+        $bu = strtoupper(trim((string)($this->badan_usaha ?? $this->company ?? '')));
+        if (empty($bu)) {
+            return true;
+        }
+        return str_contains($bu, 'MEDIA SELULAR') || str_contains($bu, 'MSI') || (!str_contains($bu, 'TOP') && !str_contains($bu, 'COMPLETE'));
+    }
+
+    public function getApprovalStageLabelAttribute(): string
+    {
+        return match ($this->approval_status) {
+            'DRAFT' => 'Draft (Belum Diajukan)',
+            'DIAJUKAN' => ($this->effective_employee?->isAsm() || $this->user?->isAsm()) 
+                ? 'Menunggu Approval RGM' 
+                : (($this->effective_employee?->isRgm() || $this->user?->isRgm()) ? 'Menunggu Verifikasi Admin' : 'Menunggu Approval ASM'),
+            'ACC_ASM' => 'Menunggu Approval RGM',
+            'ACC_RGM' => 'Menunggu Verifikasi Admin',
+            'ACC_ADMIN' => 'Menunggu Approval Head of Sales (Pak Jejen)',
+            'ACC_PAK_JEJEN' => $this->isTopSelular() 
+                ? 'Menunggu Approval Manajer Keuangan (Thia Aisyah)' 
+                : 'Menunggu Approval Manager Finance (Yoga P. Hadi)',
+            'WAITING_YOGA' => 'Menunggu Approval Manager Finance (Yoga P. Hadi)',
+            'WAITING_NURBAITI', 'ACC_YOGA' => 'Menunggu Approval Finance Coordinator (Nurbaeti Riaseha)',
+            'WAITING_THIA' => 'Menunggu Approval Manajer Keuangan (Thia Aisyah)',
+            'ACC_NURBAITI' => 'Menunggu Pencairan Finance PT Media Selular Indonesia',
+            'ACC_THIA' => 'Menunggu Pencairan Finance CV Top Selular',
+            'DISETUJUI' => $this->disbursement_status === 'Sudah Dicairkan' 
+                ? 'Selesai Dicairkan' 
+                : ($this->isTopSelular() 
+                    ? 'Disetujui (Antrean Pencairan Finance CV Top Selular)' 
+                    : 'Disetujui (Antrean Pencairan Finance PT Media Selular Indonesia)'),
+            'SEDANG_DIREVISI' => 'Perlu Revisi Pemohon',
+            'DITOLAK_FINANCE' => 'Ditolak Finance',
+            'DITOLAK' => 'Ditolak',
+            default => $this->approval_status ?? '-',
+        };
+    }
+
+    public function getApprovalJourneySummaryAttribute(): ?string
+    {
+        if (!empty($this->rejection_reason)) {
+            return "Alasan Tolak: {$this->rejection_reason}";
+        }
+        $stages = [];
+        if ($this->approved_by_asm_at) $stages[] = 'ASM: ' . ($this->asmApprover?->name ?? 'OK');
+        if ($this->approved_by_rgm_at) $stages[] = 'RGM: ' . ($this->rgmApprover?->name ?? 'OK');
+        if ($this->admin_approved_at) $stages[] = 'Admin: ' . ($this->adminApprover?->name ?? 'OK');
+        if ($this->approved_by_jejen_at) $stages[] = 'Head of Sales (Jejen): OK';
+        if ($this->approved_by_yoga_at) $stages[] = 'Mgr Finance (Yoga P. Hadi): OK';
+        if ($this->approved_by_nurbaiti_at) $stages[] = 'Finance Coord (Nurbaeti Riaseha): OK';
+        if ($this->approved_by_thia_at) $stages[] = 'Mgr Keuangan (Thia Aisyah): OK';
+        if ($this->disbursed_at) $stages[] = 'Dicairkan: ' . $this->disbursed_at->format('d/m/Y');
+
+        return !empty($stages) ? implode(' → ', $stages) : null;
+    }
+
     protected static function booted(): void
     {
         static::creating(function (Claim $claim) {
@@ -145,11 +303,49 @@ class Claim extends Model
             if (empty($claim->employee_id) && auth()->check() && auth()->user()->employee_id) {
                 $claim->employee_id = auth()->user()->employee_id;
             }
-            if (empty($claim->_uid)) {
-                $claim->_uid = 'UID-' . date('Ymd') . '-' . str_pad(mt_rand(1000, 9999), 4, '0', STR_PAD_LEFT);
+
+            // Sync Badan Usaha & Company
+            $submitter = auth()->user() ?? ($claim->user_id ? User::find($claim->user_id) : null);
+            if (empty($claim->badan_usaha) && $submitter) {
+                $claim->badan_usaha = $submitter->badan_usaha ?? 'PT MEDIA SELULAR INDONESIA';
             }
-            if (empty($claim->approval_status) || $claim->approval_status === 'DRAFT') {
-                $claim->approval_status = 'DIAJUKAN';
+            if (empty($claim->company)) {
+                $claim->company = $claim->badan_usaha;
+            }
+
+            if (empty($claim->_uid)) {
+                $claim->_uid = static::generateUid($claim->badan_usaha);
+            }
+            if (empty($claim->claim_date)) {
+                $claim->claim_date = now()->toDateString();
+            }
+            $applicantEmp = $claim->effective_employee ?? ($claim->employee_id ? Employee::find($claim->employee_id) : null);
+            $isAsmApplicant = $applicantEmp?->isAsm() || $submitter?->isAsm();
+            $isRgmApplicant = $applicantEmp?->isRgm() || $submitter?->isRgm();
+
+            if (empty($claim->approval_status) || in_array($claim->approval_status, ['DRAFT', 'DIAJUKAN'])) {
+                if ($isAsmApplicant) {
+                    $claim->approval_status = 'ACC_ASM';
+                    $claim->approved_by_asm_id = $claim->approved_by_asm_id ?? ($claim->user_id ?? auth()->id());
+                    $claim->approved_by_asm_at = $claim->approved_by_asm_at ?? now();
+                } elseif ($isRgmApplicant) {
+                    $claim->approval_status = 'ACC_RGM';
+                    $claim->approved_by_rgm_id = $claim->approved_by_rgm_id ?? ($claim->user_id ?? auth()->id());
+                    $claim->approved_by_rgm_at = $claim->approved_by_rgm_at ?? now();
+                } else {
+                    $claim->approval_status = 'DIAJUKAN';
+                }
+            }
+
+            // Validasi pembatasan role Sales: hanya boleh mengajukan Perdin dan Service Motor
+            $submitter = auth()->user() ?? ($claim->user_id ? User::find($claim->user_id) : null);
+            if ($submitter && $submitter->isSales() && !$submitter->isAdmin() && !$submitter->isSuperAdmin()) {
+                $category = $claim->claim_category;
+                $isPerdin = (bool)$claim->is_perdin;
+                $isService = in_array($category, ['service', 'service_motor']);
+                if (!$isPerdin && !$isService && $category !== 'perdin') {
+                    throw new \InvalidArgumentException('Karyawan Sales hanya diizinkan mengajukan Klaim Perjalanan Dinas (Perdin) dan Klaim Service Motor.');
+                }
             }
         });
 
@@ -175,9 +371,10 @@ class Claim extends Model
 
                 $calcAmount = (float)$claim->meal_allowance
                     + (float)$claim->lodging_allowance
-                    + (float)$claim->toll_cost
                     + (float)$claim->fuel_cost
+                    + (float)$claim->travel_cost
                     + (float)$claim->car_rental_cost
+                    + (float)($claim->other_transport_cost ?: $claim->toll_cost)
                     + (float)$claim->service_cost;
 
                 if ($calcAmount > 0 || empty($claim->amount) || (float)$claim->amount == 0) {
@@ -203,11 +400,14 @@ class Claim extends Model
 
                 foreach ($claim->items as $item) {
                     $totalFromItems += (float) ($item['amount'] ?? 0);
-                    if (!empty($item['claim_type'])) {
-                        $types[] = $item['claim_type'];
+                    $itemName = $item['item_name'] ?? ($item['name'] ?? ($item['claim_type'] ?? null));
+                    if (!empty($itemName)) {
+                        $types[] = $itemName;
                     }
                     if (!empty($item['purpose'])) {
                         $purposes[] = $item['purpose'];
+                    } elseif (!empty($itemName)) {
+                        $purposes[] = $itemName;
                     }
                     if (!empty($item['note'])) {
                         $notes[] = $item['note'];
@@ -217,12 +417,37 @@ class Claim extends Model
                     }
                 }
 
-                $claim->amount = $totalFromItems;
-                $claim->claim_type = array_values(array_unique($types));
-                $claim->purpose = array_values(array_unique($purposes));
-                $claim->note = implode(' | ', array_filter($notes));
+                if ($totalFromItems > 0 || empty($claim->amount) || (float)$claim->amount == 0) {
+                    $claim->amount = $totalFromItems;
+                }
+
+                if ($claim->claim_category === 'service' || $claim->claim_category === 'service_motor') {
+                    $claim->claim_type = ['Service Motor'];
+                    if (!empty($types)) {
+                        $claim->purpose = array_values(array_unique(array_merge($types, $purposes)));
+                    }
+                } else {
+                    $claim->claim_type = array_values(array_unique($types));
+                    $claim->purpose = array_values(array_unique($purposes));
+                }
+
+                if (!empty($notes)) {
+                    $claim->note = implode(' | ', array_filter($notes));
+                }
                 if (!empty($cities)) {
                     $claim->city = implode(', ', array_values(array_unique($cities)));
+                } elseif (!empty($claim->city)) {
+                    $updatedItems = $claim->items;
+                    $itemChanged = false;
+                    foreach ($updatedItems as $idx => $it) {
+                        if (empty($it['city'])) {
+                            $updatedItems[$idx]['city'] = $claim->city;
+                            $itemChanged = true;
+                        }
+                    }
+                    if ($itemChanged) {
+                        $claim->items = $updatedItems;
+                    }
                 }
             }
 
@@ -492,6 +717,15 @@ class Claim extends Model
         return self::terbilang($val);
     }
 
+    public function getTerbilangMealAllowanceAttribute(): string
+    {
+        $val = (float)($this->meal_allowance ?? 0);
+        if ($val <= 0) {
+            return 'Nol';
+        }
+        return self::terbilang($val);
+    }
+
     public function getPerdinReturnDeadlineAttribute(): ?\Carbon\Carbon
     {
         if (!$this->is_perdin && $this->claim_category !== 'perdin') {
@@ -649,6 +883,233 @@ class Claim extends Model
         return $this->hasOne(AttendanceDoc::class);
     }
 
+    public function asmApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_asm_id');
+    }
+
+    public function rgmApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_rgm_id');
+    }
+
+    public function adminApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'admin_approved_by_id');
+    }
+
+    public function jejenApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_jejen_id');
+    }
+
+    public function yogaApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_yoga_id');
+    }
+
+    public function nurbaitiApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_nurbaiti_id');
+    }
+
+    public function thiaApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_thia_id');
+    }
+
+    public function financeApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'finance_approved_by_id');
+    }
+
+    /**
+     * Check if this claim has attendance data (either via attendanceDoc or items repeater)
+     */
+    public function hasAttendanceData(): bool
+    {
+        if ($this->attendanceDoc()->exists()) {
+            return true;
+        }
+
+        if (is_array($this->items)) {
+            foreach ($this->items as $it) {
+                if (!empty($it['attendance_purpose']) || !empty($it['attendance_participants'])) {
+                    return true;
+                }
+                if (($it['claim_type'] ?? '') === 'Entertain' && in_array($it['entertain_subtype'] ?? '', ['Makan', 'Ulang Tahun'])) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Build an in-memory AttendanceDoc instance from claim data without persisting to DB
+     */
+    public function buildAttendanceDocInstance(): ?AttendanceDoc
+    {
+        if ($this->relationLoaded('attendanceDoc') && $this->attendanceDoc) {
+            return $this->attendanceDoc;
+        }
+
+        $entertainItem = null;
+        if (is_array($this->items)) {
+            foreach ($this->items as $it) {
+                if (!empty($it['attendance_participants']) || !empty($it['attendance_purpose'])) {
+                    $entertainItem = $it;
+                    break;
+                }
+                if (($it['claim_type'] ?? '') === 'Entertain' && in_array($it['entertain_subtype'] ?? '', ['Makan', 'Ulang Tahun'])) {
+                    $entertainItem = $it;
+                    break;
+                }
+            }
+        }
+
+        if (!$entertainItem && !$this->hasAttendanceData()) {
+            return $this->attendanceDoc;
+        }
+
+        $purpose = !empty($entertainItem['attendance_purpose']) 
+            ? $entertainItem['attendance_purpose'] 
+            : (!empty($entertainItem['purpose']) ? $entertainItem['purpose'] : ($this->purpose_string ?: 'Jamuan Makan & Pertemuan Tim'));
+        $place = !empty($entertainItem['attendance_place']) 
+            ? $entertainItem['attendance_place'] 
+            : (!empty($entertainItem['note']) ? $entertainItem['note'] : ($this->city ?: 'Purwokerto'));
+        $date = !empty($entertainItem['attendance_date']) 
+            ? \Carbon\Carbon::parse($entertainItem['attendance_date']) 
+            : (!empty($entertainItem['receipt_date']) ? \Carbon\Carbon::parse($entertainItem['receipt_date']) : ($this->claim_date ?: now()));
+        $notes = $entertainItem['attendance_notes'] ?? null;
+        $subtype = $entertainItem['entertain_subtype'] ?? 'Makan';
+        $category = $subtype === 'Ulang Tahun' ? 'Ulang Tahun' : 'Makan';
+
+        $doc = new AttendanceDoc([
+            'claim_id' => $this->id,
+            'user_id' => $this->user_id,
+            'employee_id' => $this->effective_employee_id ?? $this->employee_id,
+            'claim_period_id' => $this->claim_period_id,
+            'category' => $category,
+            'purpose' => $purpose,
+            'place' => $place,
+            'date' => $date,
+            'notes' => $notes,
+            'photos' => $entertainItem['attendance_photos'] ?? ($this->photos ?? []),
+            'receipt_photos' => $this->photos ?? [],
+            'estimated_amount' => (float)$this->amount,
+            'admin_status' => 'SUDAH_DISESUAIKAN',
+        ]);
+
+        $participantsCollection = collect();
+        $participants = $entertainItem['attendance_participants'] ?? [];
+        if (is_array($participants)) {
+            foreach ($participants as $p) {
+                if (!empty($p['name'])) {
+                    $part = new \App\Models\AttendancePart([
+                        'name' => $p['name'],
+                        'position' => $p['position'] ?? null,
+                        'signature_info' => $p['status'] ?? 'HADIR',
+                    ]);
+                    $participantsCollection->push($part);
+                }
+            }
+        }
+        $doc->setRelation('participants', $participantsCollection);
+
+        return $doc;
+    }
+
+    /**
+     * Sync or get the AttendanceDoc instance for this claim
+     */
+    public function syncOrGetAttendanceDoc(): ?AttendanceDoc
+    {
+        $doc = $this->attendanceDoc;
+
+        // If items contain attendance info, create or sync
+        if (is_array($this->items)) {
+            $entertainItem = null;
+            foreach ($this->items as $it) {
+                if (!empty($it['attendance_participants']) || !empty($it['attendance_purpose'])) {
+                    $entertainItem = $it;
+                    break;
+                }
+                if (($it['claim_type'] ?? '') === 'Entertain' && in_array($it['entertain_subtype'] ?? '', ['Makan', 'Ulang Tahun'])) {
+                    $entertainItem = $it;
+                    break;
+                }
+            }
+
+            if ($entertainItem) {
+                $purpose = !empty($entertainItem['attendance_purpose']) 
+                    ? $entertainItem['attendance_purpose'] 
+                    : (!empty($entertainItem['purpose']) ? $entertainItem['purpose'] : ($this->purpose_string ?: 'Jamuan Makan & Pertemuan Tim'));
+                $place = !empty($entertainItem['attendance_place']) 
+                    ? $entertainItem['attendance_place'] 
+                    : (!empty($entertainItem['note']) ? $entertainItem['note'] : ($this->city ?: 'Purwokerto'));
+                $date = !empty($entertainItem['attendance_date']) 
+                    ? $entertainItem['attendance_date'] 
+                    : (!empty($entertainItem['receipt_date']) ? $entertainItem['receipt_date'] : ($this->claim_date ?: now()));
+                $notes = $entertainItem['attendance_notes'] ?? null;
+
+                $subtype = $entertainItem['entertain_subtype'] ?? 'Makan';
+                $category = $subtype === 'Ulang Tahun' ? 'Ulang Tahun' : 'Makan';
+                $adminStatus = in_array($this->approval_status, ['ACC_ADMIN', 'DISETUJUI']) ? 'SUDAH_DISESUAIKAN' : 'MENUNGGU_PENYESUAIAN';
+
+                if (!$doc) {
+                    $doc = AttendanceDoc::create([
+                        'claim_id' => $this->id,
+                        'user_id' => $this->user_id,
+                        'employee_id' => $this->effective_employee_id ?? $this->employee_id,
+                        'claim_period_id' => $this->claim_period_id,
+                        'category' => $category,
+                        'purpose' => $purpose,
+                        'place' => $place,
+                        'date' => $date,
+                        'notes' => $notes,
+                        'photos' => $entertainItem['attendance_photos'] ?? ($this->photos ?? []),
+                        'receipt_photos' => $this->photos ?? [],
+                        'estimated_amount' => (float)$this->amount,
+                        'admin_status' => $adminStatus,
+                    ]);
+                } else {
+                    $doc->update([
+                        'category' => $category,
+                        'purpose' => $purpose,
+                        'place' => $place,
+                        'date' => $date,
+                        'notes' => $notes,
+                        'photos' => $entertainItem['attendance_photos'] ?? ($doc->photos ?? $this->photos),
+                        'receipt_photos' => $this->photos ?: $doc->receipt_photos,
+                        'estimated_amount' => (float)$this->amount ?: $doc->estimated_amount,
+                        'admin_status' => $adminStatus,
+                    ]);
+                }
+
+                // Sync participants
+                $participants = $entertainItem['attendance_participants'] ?? [];
+                if (is_array($participants) && count($participants) > 0) {
+                    $doc->participants()->delete();
+                    foreach ($participants as $p) {
+                        if (!empty($p['name'])) {
+                            $doc->participants()->create([
+                                'name' => $p['name'],
+                                'position' => $p['position'] ?? null,
+                                'signature_info' => $p['status'] ?? 'HADIR',
+                            ]);
+                        }
+                    }
+                }
+
+                return $doc->fresh(['participants']);
+            }
+        }
+
+        return $doc;
+    }
+
     public function approvedByAsm(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by_asm_id');
@@ -680,14 +1141,19 @@ class Claim extends Model
     public static function isAsmSupervisorOf(?User $user, Claim $record): bool
     {
         if (!$user) return false;
+
+        $applicantEmp = $record->effective_employee;
+        // Jika pemohon adalah ASM atau RGM, tidak perlu dan tidak boleh di-ACC oleh ASM (langsung ke RGM / Admin)
+        if ($applicantEmp) {
+            if ($applicantEmp->isAsm() || $applicantEmp->isRgm()) return false;
+        } elseif ($record->user?->isAsm() || $record->user?->isRgm()) {
+            return false;
+        }
+
         if ($user->isSuperAdmin() || $user->isAdmin()) return true;
         if (!$user->isAsm()) return false;
 
-        $applicantEmp = $record->effective_employee;
         if (!$applicantEmp) return false;
-
-        // Jika pemohon adalah ASM atau RGM, ASM tidak bisa meng-ACC
-        if ($applicantEmp->isAsm() || $applicantEmp->isRgm()) return false;
 
         $asmEmpId = $user->getEffectiveEmployeeId();
         if ($asmEmpId && $applicantEmp->supervisor_id == $asmEmpId) {
@@ -768,7 +1234,7 @@ class Claim extends Model
             return $query->whereRaw('1 = 0');
         }
 
-        if ($user->isSuperAdmin()) {
+        if ($user->isSuperAdmin() || $user->isAdmin()) {
             return $query;
         }
 
@@ -779,43 +1245,6 @@ class Claim extends Model
             });
         }
 
-        if ($user->isAdmin()) {
-            $managedRegions = $user->getManagedRegionsList();
-
-            return $query->where(function (Builder $q) use ($user, $managedRegions) {
-                // 1. Data inputted by this admin
-                $q->where('user_id', $user->id);
-
-                // 2. Data from users whose region matches the admin's managed regions
-                if (!empty($managedRegions)) {
-                    $q->orWhere(function (Builder $sub) use ($managedRegions) {
-                        $sub->where(function (Builder $rc) use ($managedRegions) {
-                            foreach ($managedRegions as $region) {
-                                $rc->orWhereRaw('UPPER(claims.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                                   ->orWhereRaw('UPPER(claims.homebase) LIKE ?', ['%' . strtoupper($region) . '%'])
-                                   ->orWhereRaw('UPPER(claims.city) LIKE ?', ['%' . strtoupper($region) . '%']);
-                            }
-                            $rc->orWhereHas('employee', function (Builder $empQuery) use ($managedRegions) {
-                                $empQuery->where(function (Builder $eq) use ($managedRegions) {
-                                    foreach ($managedRegions as $region) {
-                                        $eq->orWhereRaw('UPPER(employees.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                                           ->orWhereRaw('UPPER(employees.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
-                                    }
-                                });
-                            });
-                            $rc->orWhereHas('user', function (Builder $uQuery) use ($managedRegions) {
-                                $uQuery->where(function (Builder $uq) use ($managedRegions) {
-                                    foreach ($managedRegions as $region) {
-                                        $uq->orWhereRaw('UPPER(users.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                                           ->orWhereRaw('UPPER(users.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
-                                    }
-                                });
-                            });
-                        });
-                    });
-                }
-            });
-        }
 
         $empId = $user->getEffectiveEmployeeId();
 
@@ -851,7 +1280,8 @@ class Claim extends Model
         if ($user->isJejen()) {
             return $query->where(function (Builder $q) use ($user) {
                 $q->where('user_id', $user->id)
-                  ->orWhereIn('approval_status', ['ACC_RGM', 'ACC_PAK_JEJEN', 'DISETUJUI'])
+                  ->orWhere('approved_by_jejen_id', $user->id)
+                  ->orWhereIn('approval_status', ['ACC_RGM', 'ACC_PAK_JEJEN', 'WAITING_YOGA', 'WAITING_NURBAITI', 'WAITING_THIA', 'DISETUJUI'])
                   ->orWhere(function ($sub) {
                       $sub->where('approval_status', 'DIAJUKAN')
                           ->whereHas('employee', function ($eq) {
@@ -860,6 +1290,30 @@ class Claim extends Model
                                  ->orWhere('position', 'like', '%RGM%');
                           });
                   });
+            });
+        }
+
+        if ($user->isYoga()) {
+            return $query->where(function (Builder $q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhere('approved_by_yoga_id', $user->id)
+                  ->orWhereIn('approval_status', ['WAITING_YOGA', 'WAITING_NURBAITI', 'ACC_YOGA', 'DISETUJUI']);
+            });
+        }
+
+        if ($user->isNurbaiti()) {
+            return $query->where(function (Builder $q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhere('approved_by_nurbaiti_id', $user->id)
+                  ->orWhereIn('approval_status', ['WAITING_NURBAITI', 'DISETUJUI']);
+            });
+        }
+
+        if ($user->isThia()) {
+            return $query->where(function (Builder $q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhere('approved_by_thia_id', $user->id)
+                  ->orWhereIn('approval_status', ['WAITING_THIA', 'DISETUJUI']);
             });
         }
 
@@ -976,13 +1430,15 @@ class Claim extends Model
             }
             $regions = $user->getRegionList();
             if (!empty($regions)) {
-                $q->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
+                $q->orWhereIn('claims.region', $regions)
+                  ->orWhereHas('employee', fn ($eq) => $eq->whereIn('region', $regions));
             }
         });
     }
 
     /**
      * Scope: Klaim yang menunggu ACC dari Head of Sales (Pak Jejen)
+     * Alur Baru: Pak Jejen menerima klaim yang telah diverifikasi oleh Admin (ACC_ADMIN)
      */
     public function scopePendingJejenApproval(Builder $query, ?User $user = null): Builder
     {
@@ -995,27 +1451,40 @@ class Claim extends Model
             }
         }
 
-        // Waiting for Jejen:
-        // Case A: Claims that reached ACC_RGM
-        // Case B: Claims that reached ACC_ASM
-        // Case C: RGM claims with DIAJUKAN
-        // Case D: ASM claims with DIAJUKAN
-        return $query->where(function (Builder $q) {
-            $q->whereIn('approval_status', ['ACC_RGM', 'ACC_ASM'])
-              ->orWhere(function ($sub) {
-                  $sub->where('approval_status', 'DIAJUKAN')
-                      ->whereHas('employee', function ($eq) {
-                          $eq->whereHas('role', fn ($rq) => $rq->where('code', 'like', '%RGM%')->orWhere('name', 'like', '%RGM%')->orWhere('code', 'like', '%ASM%')->orWhere('name', 'like', '%ASM%'))
-                             ->orWhereHas('positionModel', fn ($pq) => $pq->where('name', 'like', '%RGM%')->orWhere('name', 'like', '%ASM%'))
-                             ->orWhere('position', 'like', '%RGM%')
-                             ->orWhere('position', 'like', '%ASM%');
-                      });
-              });
-        });
+        return $query->where('approval_status', 'ACC_ADMIN');
+    }
+
+    /**
+     * Scope: Klaim yang menunggu ACC dari Manager Finance (Pak Yoga) - PT Media Selular Indonesia
+     */
+    public function scopePendingYogaApproval(Builder $query, ?User $user = null): Builder
+    {
+        return $query->where('approval_status', 'WAITING_YOGA');
+    }
+
+    /**
+     * Scope: Klaim yang menunggu ACC dari Finance Coordinator (Bu Nurbaiti) - PT Media Selular Indonesia
+     */
+    public function scopePendingNurbaitiApproval(Builder $query, ?User $user = null): Builder
+    {
+        return $query->where('approval_status', 'WAITING_NURBAITI');
+    }
+
+    /**
+     * Scope: Klaim yang menunggu ACC dari Manajer Keuangan (Thia Aisyah) - CV Top Selular
+     */
+    public function scopePendingThiaApproval(Builder $query, ?User $user = null): Builder
+    {
+        return $query->where('approval_status', 'WAITING_THIA');
     }
 
     /**
      * Scope: Klaim yang menunggu verifikasi dari Admin
+     * Alur Resmi Ketat: Sales -> ASM -> RGM -> Admin -> Head of Sales -> Finance
+     * Admin HANYA menerima:
+     * 1. Klaim yang telah disetujui RGM (ACC_RGM)
+     * 2. Klaim yang diajukan langsung oleh RGM (DIAJUKAN dengan pemohon RGM)
+     * 3. Klaim hasil revisi yang dikembalikan oleh Finance (DITOLAK_FINANCE)
      */
     public function scopePendingAdminVerification(Builder $query, ?User $user = null): Builder
     {
@@ -1024,30 +1493,39 @@ class Claim extends Model
             return $query->whereRaw('1 = 0');
         }
 
-        $query->whereIn('approval_status', ['ACC_PAK_JEJEN', 'DITOLAK_FINANCE']);
+        $query->where(function (Builder $q) {
+            $q->whereIn('approval_status', ['ACC_RGM', 'DITOLAK_FINANCE'])
+              ->orWhere(function ($sub) {
+                  $sub->where('approval_status', 'DIAJUKAN')
+                      ->whereHas('employee', function ($eq) {
+                          $eq->whereHas('role', fn ($rq) => $rq->where('code', 'like', '%RGM%')->orWhere('name', 'like', '%RGM%'))
+                             ->orWhereHas('positionModel', fn ($pq) => $pq->where('name', 'like', '%RGM%'))
+                             ->orWhere('position', 'like', '%RGM%');
+                      });
+              });
+        });
 
-        if ($user->isSuperAdmin()) {
+        if ($user->isSuperAdmin() || $user->isAdmin()) {
             return $query;
         }
 
         $managedRegions = $user->getManagedRegionsList();
-        return $query->where(function (Builder $q) use ($user, $managedRegions) {
-            $q->where('user_id', $user->id);
-            if (!empty($managedRegions)) {
-                $q->orWhere(function (Builder $sub) use ($managedRegions) {
-                    foreach ($managedRegions as $region) {
-                        $sub->orWhereRaw('UPPER(claims.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                            ->orWhereRaw('UPPER(claims.homebase) LIKE ?', ['%' . strtoupper($region) . '%'])
-                            ->orWhereRaw('UPPER(claims.city) LIKE ?', ['%' . strtoupper($region) . '%']);
-                    }
-                    $sub->orWhereHas('employee', function (Builder $eq) use ($managedRegions) {
-                        foreach ($managedRegions as $region) {
-                            $eq->orWhereRaw('UPPER(employees.region) LIKE ?', ['%' . strtoupper($region) . '%'])
-                               ->orWhereRaw('UPPER(employees.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
-                        }
-                    });
-                });
+        if (empty($managedRegions)) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $q) use ($managedRegions) {
+            foreach ($managedRegions as $region) {
+                $q->orWhereRaw('UPPER(claims.region) LIKE ?', ['%' . strtoupper($region) . '%'])
+                  ->orWhereRaw('UPPER(claims.homebase) LIKE ?', ['%' . strtoupper($region) . '%'])
+                  ->orWhereRaw('UPPER(claims.city) LIKE ?', ['%' . strtoupper($region) . '%']);
             }
+            $q->orWhereHas('employee', function (Builder $eq) use ($managedRegions) {
+                foreach ($managedRegions as $region) {
+                    $eq->orWhereRaw('UPPER(employees.region) LIKE ?', ['%' . strtoupper($region) . '%'])
+                       ->orWhereRaw('UPPER(employees.homebase) LIKE ?', ['%' . strtoupper($region) . '%']);
+                }
+            });
         });
     }
 
@@ -1091,6 +1569,66 @@ class Claim extends Model
     }
 
     /**
+     * Scope: Klaim yang sudah di-ACC Admin dan sedang menunggu approval atasan eksekutif
+     */
+    public function scopeApprovedByAdminWaitingExecutive(Builder $query): Builder
+    {
+        return $query->whereIn('approval_status', [
+            'ACC_ADMIN',
+            'ACC_PAK_JEJEN',
+            'WAITING_YOGA',
+            'WAITING_THIA',
+            'WAITING_NURBAITI',
+        ]);
+    }
+
+    /**
+     * Scope: Klaim yang dapat dilihat oleh Finance (sudah di-ACC Admin ke atas atau sudah dicairkan)
+     */
+    public function scopeVisibleToFinance(Builder $query, ?User $user = null): Builder
+    {
+        $query->where(function (Builder $q) {
+            $q->whereIn('approval_status', [
+                'ACC_ADMIN',
+                'ACC_PAK_JEJEN',
+                'WAITING_YOGA',
+                'WAITING_THIA',
+                'WAITING_NURBAITI',
+                'DISETUJUI',
+                'DITOLAK_FINANCE',
+            ])
+            ->orWhere('disbursement_status', 'Sudah Dicairkan');
+        });
+
+        if ($user) {
+            if ($user->isFinanceTop() || $user->isFinanceCvcs()) {
+                $query->where(function (Builder $q) {
+                    $q->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%TOP%'")
+                      ->orWhereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%COMPLETE%'")
+                      ->orWhereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%CV%'");
+                });
+            } elseif ($user->isFinanceMsi()) {
+                $query->where(function (Builder $q) {
+                    $q->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%MEDIA SELULAR%'")
+                      ->orWhereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%MSI%'")
+                      ->orWhere(function ($sub) {
+                          $sub->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) NOT LIKE '%TOP%'")
+                              ->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) NOT LIKE '%COMPLETE%'");
+                      });
+                });
+            } elseif (!empty($user->badan_usaha)) {
+                $bu = strtoupper(trim($user->badan_usaha));
+                $query->where(function (Builder $q) use ($bu) {
+                    $q->whereRaw('UPPER(badan_usaha) LIKE ?', ["%{$bu}%"])
+                      ->orWhereRaw('UPPER(company) LIKE ?', ["%{$bu}%"]);
+                });
+            }
+        }
+
+        return $query;
+    }
+
+    /**
      * Get array of all line items (for Excel rows)
      */
     public function getLineItems(): array
@@ -1100,8 +1638,8 @@ class Claim extends Model
             if ((float)$this->meal_allowance > 0) {
                 $items[] = [
                     'claim_type' => 'Perjalanan Dinas (Uang Makan)',
-                    'purpose' => "Uang Makan {$this->days_count} Hari ({$this->destination_city})",
-                    'note' => "Homebase: {$this->homebase} -> {$this->destination_city} ({$this->distance_km} km)",
+                    'purpose' => "Uang Makan {$this->days_count} Hari",
+                    'note' => "Tujuan: {$this->destination_city} ({$this->distance_km} km)",
                     'city' => $this->destination_city ?: $this->city,
                     'amount' => (float)$this->meal_allowance,
                 ];

@@ -49,12 +49,37 @@ class FinanceClaimResource extends Resource
             return $query->whereRaw('1 = 0');
         }
 
-        // Finance: Hanya menampilkan klaim yang sudah disetujui Admin (DISETUJUI), sedang direvisi Admin (DITOLAK_FINANCE), atau sudah dicairkan
+        // Finance: Hanya menampilkan klaim yang sudah disetujui (DISETUJUI), sedang direvisi Admin (DITOLAK_FINANCE), atau sudah dicairkan
         if ($user->isFinance()) {
-            return $query->where(function (Builder $q) {
+            $query->where(function (Builder $q) {
                 $q->whereIn('approval_status', ['DISETUJUI', 'DITOLAK_FINANCE'])
                   ->orWhere('disbursement_status', 'Sudah Dicairkan');
             });
+
+            if ($user->isFinanceTop() || $user->isFinanceCvcs()) {
+                $query->where(function (Builder $q) {
+                    $q->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%TOP%'")
+                      ->orWhereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%COMPLETE%'")
+                      ->orWhereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%CV%'");
+                });
+            } elseif ($user->isFinanceMsi()) {
+                $query->where(function (Builder $q) {
+                    $q->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%MEDIA SELULAR%'")
+                      ->orWhereRaw("UPPER(COALESCE(badan_usaha, company, '')) LIKE '%MSI%'")
+                      ->orWhere(function ($sub) {
+                          $sub->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) NOT LIKE '%TOP%'")
+                              ->whereRaw("UPPER(COALESCE(badan_usaha, company, '')) NOT LIKE '%COMPLETE%'");
+                      });
+                });
+            } elseif (!empty($user->badan_usaha)) {
+                $bu = strtoupper(trim($user->badan_usaha));
+                $query->where(function (Builder $q) use ($bu) {
+                    $q->whereRaw('UPPER(badan_usaha) LIKE ?', ["%{$bu}%"])
+                      ->orWhereRaw('UPPER(company) LIKE ?', ["%{$bu}%"]);
+                });
+            }
+
+            return $query;
         }
 
         if ($user->isAdmin()) {
@@ -125,7 +150,8 @@ class FinanceClaimResource extends Resource
                     ->placeholder('Belum Ada _UID')
                     ->searchable()
                     ->sortable()
-                    ->weight('bold'),
+                    ->weight('bold')
+                    ->copyable(),
 
                 Tables\Columns\TextColumn::make('claim_date')
                     ->label('Tanggal Nota Balik')
@@ -146,7 +172,8 @@ class FinanceClaimResource extends Resource
                     ->money('IDR')
                     ->weight('bold')
                     ->color('primary')
-                    ->state(fn (Claim $record) => (float)($record->effective_employee?->bbm_budget ?? 0)),
+                    ->state(fn (Claim $record) => (float)($record->effective_employee?->bbm_budget ?? 0))
+                    ->visibleFrom('md'),
 
                 // Total Realisasi Nota Balik
                 Tables\Columns\TextColumn::make('amount')
@@ -179,7 +206,8 @@ class FinanceClaimResource extends Resource
                         if (str_contains($state, 'Wajib Balik')) return 'danger';
                         if (str_contains($state, 'Over')) return 'warning';
                         return 'gray';
-                    }),
+                    })
+                    ->visibleFrom('md'),
 
                 Tables\Columns\TextColumn::make('claim_category')
                     ->label('Kategori')
@@ -210,7 +238,8 @@ class FinanceClaimResource extends Resource
                 Tables\Columns\TextColumn::make('disbursement_status')
                     ->label('Pencairan Bulan Ini')
                     ->badge()
-                    ->color(fn (string $state): string => $state === 'Sudah Dicairkan' ? 'success' : 'danger'),
+                    ->color(fn (string $state): string => $state === 'Sudah Dicairkan' ? 'success' : 'danger')
+                    ->visibleFrom('md'),
 
                 // Indikator apakah sudah ada bukti BBM bulan sebelumnya
                 Tables\Columns\IconColumn::make('has_prev_month_proof')
@@ -223,7 +252,8 @@ class FinanceClaimResource extends Resource
                     ->tooltip(fn (Claim $record) => $record->bbm_photo_before || $record->bbm_photo_combined || $record->bbm_photo_after
                         ? 'Bukti penggunaan BBM bulan sebelumnya sudah lengkap'
                         : 'Belum ada bukti BBM bulan sebelumnya')
-                    ->state(fn (Claim $record) => !empty($record->bbm_photo_before) || !empty($record->bbm_photo_combined) || !empty($record->bbm_photo_after)),
+                    ->state(fn (Claim $record) => !empty($record->bbm_photo_before) || !empty($record->bbm_photo_combined) || !empty($record->bbm_photo_after))
+                    ->visibleFrom('md'),
 
                 Tables\Columns\TextColumn::make('financeApprovedBy.name')
                     ->label('Diproses Oleh')
@@ -263,11 +293,6 @@ class FinanceClaimResource extends Resource
                 // 1. Tombol Lihat Semua Berkas Pengajuan Klaim (Galeri Nota, Struk, Kwitansi, BBM)
                 \App\Filament\Actions\ViewClaimFilesAction::make(),
 
-                // 2. Tombol Detail Form Klaim (Read-Only)
-                Tables\Actions\ViewAction::make()
-                    ->label('Detail')
-                    ->color('gray'),
-
                 // 3. Download Dokumen Khusus Klaim BBM (Word & PDF)
                 Tables\Actions\Action::make('export_bbm_word')
                     ->label('Word')
@@ -304,14 +329,23 @@ class FinanceClaimResource extends Resource
                     ->icon('heroicon-o-credit-card')
                     ->color('success')
                     ->visible(fn (Claim $record) => $record->disbursement_status !== 'Sudah Dicairkan' && $record->approval_status === 'DISETUJUI')
-                    ->modalHeading(fn (Claim $record) => "Kirim Bukti Transfer: " . ($record->effective_employee?->name ?? 'Pemohon'))
+                    ->modalHeading(fn (Claim $record) => "Kirim Bukti Transfer [" . ($record->_uid ?: 'Tanpa UID') . "] - " . ($record->effective_employee?->name ?? 'Pemohon'))
                     ->modalDescription(function (Claim $record) {
+                        $uidText = $record->_uid ? "UID: {$record->_uid}" : "UID: (Belum Ada UID)";
                         $budget = (float)($record->claim_category === 'bbm' && (float)($record->effective_employee?->bbm_budget ?? 0) > 0 
                             ? $record->effective_employee?->bbm_budget 
                             : $record->amount);
-                        return "Nominal yang dicairkan untuk " . ($record->effective_employee?->name ?? 'Pemohon') . " adalah sebesar Rp " . number_format($budget, 0, ',', '.') . ". Silakan unggah foto / bukti transfer bank:";
+                        return "{$uidText} | Nominal yang dicairkan untuk " . ($record->effective_employee?->name ?? 'Pemohon') . " adalah sebesar Rp " . number_format($budget, 0, ',', '.') . ". Silakan unggah foto / bukti transfer bank:";
                     })
                     ->form([
+                        Forms\Components\Placeholder::make('display_uid')
+                            ->label('UID Pengajuan Awal')
+                            ->content(fn (Claim $record) => new \Illuminate\Support\HtmlString(
+                                '<span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-300 border border-sky-300 dark:border-sky-700 tracking-wide">' . 
+                                e($record->_uid ?: '(Tanpa UID Pengajuan)') . 
+                                '</span>'
+                            )),
+
                         Forms\Components\FileUpload::make('transfer_proof_photo')
                             ->label('Foto / Bukti Transfer Bank')
                             ->image()
@@ -368,6 +402,84 @@ class FinanceClaimResource extends Resource
 
                 // 8. Lihat Bukti Transfer Pengembalian Sisa (User -> Finance)
                 \App\Filament\Actions\ViewReturnTransferProofAction::make(),
+
+                // 9. Finance: ACC Nota Balik Perdin
+                Tables\Actions\Action::make('approve_nota_balik_finance')
+                    ->label('ACC Nota Balik')
+                    ->icon('heroicon-o-check-badge')
+                    ->color('success')
+                    ->visible(function (Claim $record) {
+                        return $record->is_perdin &&
+                               $record->nota_balik_submitted &&
+                               $record->nota_balik_status !== 'Disetujui Finance';
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Verifikasi & ACC Nota Balik Perjalanan Dinas')
+                    ->modalDescription(function (Claim $record) {
+                        $desc = "Apakah rincian realisasi pengeluaran dan seluruh bukti fisik telah dicek dan sesuai?";
+                        if ((float)$record->remaining_amount_calculated > 0) {
+                            $desc .= " Terdapat sisa dana Rp " . number_format((float)$record->remaining_amount_calculated, 0, ',', '.') . " yang akan dinotifikasikan ke pemohon untuk dikembalikan.";
+                        }
+                        return $desc;
+                    })
+                    ->action(function (Claim $record) {
+                        $record->update([
+                            'nota_balik_status' => 'Disetujui Finance',
+                            'nota_balik_finance_sent' => true,
+                            'nota_balik_finance_sent_at' => now(),
+                        ]);
+
+                        // Item 9: Berikan notifikasi jika terdapat sisa dana pengembalian
+                        $remaining = (float)$record->remaining_amount_calculated;
+                        if ($remaining > 0) {
+                            $remainingFmt = 'Rp ' . number_format($remaining, 0, ',', '.');
+                            $recipient = $record->user ?? ($record->employee?->user);
+                            if ($recipient) {
+                                Notification::make()
+                                    ->title('Verifikasi Selesai: Pengembalian Sisa Dana Perdin')
+                                    ->body("Nota balik UID {$record->uid} telah diverifikasi. Terdapat sisa dana sebesar {$remainingFmt} yang harus dikembalikan ke kas Finance.")
+                                    ->warning()
+                                    ->sendToDatabase($recipient);
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Nota Balik Disetujui Finance!')
+                            ->body('Pertanggungjawaban Perdin telah lengkap dan disetujui.' . ($remaining > 0 ? ' Notifikasi pengembalian dana telah dikirim ke pemohon.' : ''))
+                            ->success()
+                            ->send();
+                    }),
+
+                // 10. Finance: Tolak Nota Balik dengan Catatan (Item 16)
+                Tables\Actions\Action::make('reject_nota_balik_finance')
+                    ->label('Tolak Nota Balik')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(function (Claim $record) {
+                        return $record->is_perdin &&
+                               $record->nota_balik_submitted &&
+                               $record->nota_balik_status !== 'Disetujui Finance';
+                    })
+                    ->form([
+                        Forms\Components\Textarea::make('nota_balik_rejection_reason')
+                            ->label('Alasan Penolakan Nota Balik')
+                            ->placeholder('Tuliskan alasan mengapa nota balik ditolak (contoh: foto struk SPBU buram, bukti transfer sisa dana belum terunggah, dll)...')
+                            ->required()
+                            ->rows(3),
+                    ])
+                    ->action(function (Claim $record, array $data) {
+                        $record->update([
+                            'nota_balik_status' => 'Ditolak Finance',
+                            'nota_balik_rejection_reason' => $data['nota_balik_rejection_reason'],
+                            'nota_balik_submitted' => false,
+                        ]);
+
+                        Notification::make()
+                            ->title('Nota Balik Ditolak Finance')
+                            ->body('Catatan perbaikan telah dikirim ke pemohon.')
+                            ->danger()
+                            ->send();
+                    }),
             ]);
     }
 

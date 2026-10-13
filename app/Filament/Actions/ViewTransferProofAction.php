@@ -22,8 +22,11 @@ class ViewTransferProofAction extends Action
             ->color('info')
             ->visible(fn (Claim $record) => !empty($record->transfer_proof_photo))
             ->modalHeading('Foto Bukti Transfer Pembayaran Finance')
+            ->modalCloseButton(true)
+            ->closeModalByClickingAway(true)
+            ->closeModalByEscaping(true)
             ->modalSubmitAction(false)
-            ->modalCancelActionLabel('Tutup')
+            ->modalCancelAction(fn (\Filament\Actions\StaticAction $action) => $action->label('Tutup')->color('gray'))
             ->modalContent(fn (Claim $record) => view('filament.components.transfer-proof-modal', [
                 'photo' => $record->transfer_proof_photo,
                 'record' => $record,

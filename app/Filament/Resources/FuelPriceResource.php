@@ -48,7 +48,7 @@ class FuelPriceResource extends Resource
                             ->prefix('Rp')
                             ->required()
                             ->minValue(1)
-                            ->helperText('Harga ini akan otomatis menjadi acuan dasar perhitungan liter dan konversi klaim BBM.'),
+                            ->helperText('Harga ini akan otomatis menjadi acuan dasar perhitungan liter dan konversi nota balik BBM.'),
 
                         Forms\Components\Toggle::make('is_active')
                             ->label('Status Aktif')
